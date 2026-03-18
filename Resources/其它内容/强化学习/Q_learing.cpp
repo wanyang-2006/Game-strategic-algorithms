@@ -12,7 +12,7 @@ static const int ACTIONS = 2;       // 动作: 取1或取2
 struct QLearningAgent {
     vector<vector<double>> Q; // Q[stones][action], action用1或2
     double alpha = 0.1;       // 学习率
-    double gamma = 0.95;      // 折扣因子
+    double gamma = 0.95;      // 折扣因子*
     double epsilon = 0.2;     // 探索率（训练时）
     mt19937 rng;
 
@@ -153,7 +153,7 @@ int main() {
 
         humanTurn = !humanTurn;
     }
-    
+
     system("pause");
     return 0;
 }
