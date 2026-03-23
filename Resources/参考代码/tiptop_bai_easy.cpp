@@ -6,7 +6,7 @@
 #include <string>
 #include <cstdlib>
 #include <ctime>
-#include "jsoncpp/json.h" // 在平台上，C++编译时默认包含此库
+#include "jsoncpp/json.h" // 通过本地桥接头文件接入 jsoncpp-master
 
 using namespace std;
 
