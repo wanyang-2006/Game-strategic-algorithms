@@ -9,12 +9,12 @@
             "cppStandard": "c++17",
             "includePath": [
                 "${workspaceFolder}/**",
-                "${workspaceFolder}/Resources/其它内容/jsoncpp-master/include"
+                "${workspaceFolder}/Resources/jsoncpplib/jsoncpp-master/include"
             ],
             "browse": {
                 "path": [
                     "${workspaceFolder}",
-                    "${workspaceFolder}/Resources/其它内容/jsoncpp-master/include"
+                    "${workspaceFolder}/Resources/jsoncpplib/jsoncpp-master/include"
                 ],
                 "limitSymbolsToIncludedHeaders": true
             }
