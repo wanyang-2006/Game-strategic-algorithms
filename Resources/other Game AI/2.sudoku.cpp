@@ -1,119 +1,117 @@
-#include <stdio.h>
+#include <stdio.h> // 使用 C 标准输入输出库，负责读入数独和打印答案
 
-int flag = 0, num, map[10][10]; //定义一个棋盘,num代表未填方块的个数
-typedef struct
+int flag = 0, num, map[10][10]; // flag: 是否已找到解；num: 空格总数；map: 9x9 棋盘(下标 0~8)
+typedef struct // 定义坐标结构体，用来记录每个空格的位置
 {
-    int x, y;
-} P;
-P p[81];
+    int x, y; // x: 行坐标；y: 列坐标
+} P; // 给该结构体起别名 P
+P p[81]; // 最多 81 个空格，p[i] 存第 i 个空格坐标
 
-int judge(int n, int k)
+int judge(int n, int k) // 判断数字 k 能否填入第 n 个空格
 {
-    int a, b;
-    for (a = 0; a < 9; a++)
+    int a, b; // 循环变量
+    for (a = 0; a < 9; a++) // 枚举当前空格所在行/列的所有位置
     {
-        if (map[p[n].x][a] == k && a != p[n].y) //列完全匹配
-            return 0;
+        if (map[p[n].x][a] == k && a != p[n].y) // 同一行出现相同数字，则不合法
+            return 0; // 返回 0 表示不能填
 
-        if (map[a][p[n].y] == k && a != p[n].x) //行完全匹配
-            return 0;
+        if (map[a][p[n].y] == k && a != p[n].x) // 同一列出现相同数字，则不合法
+            return 0; // 返回 0 表示不能填
     }
 
-    int x = (p[n].x / 3) * 3;
-    int y = (p[n].y / 3) * 3; //找到那个?所在的九宫格
+    int x = (p[n].x / 3) * 3; // 计算该空格所在 3x3 宫格左上角行号
+    int y = (p[n].y / 3) * 3; // 计算该空格所在 3x3 宫格左上角列号
 
-    for (a = 0; a < 3; a++)
-        for (b = 0; b < 3; b++)
+    for (a = 0; a < 3; a++) // 遍历宫格内 3 行
+        for (b = 0; b < 3; b++) // 遍历宫格内 3 列
         {
-            if (map[a + x][b + y] == k && ((a + x) != p[n].x) && (b + y) != p[n].y)
-                return 0; //新填入的数与九宫格任意的8个数都不重复
+            if (map[a + x][b + y] == k && ((a + x) != p[n].x) && (b + y) != p[n].y) // 宫格重复则不合法
+                return 0; // 返回 0 表示不能填
         }
 
-    return 1;
+    return 1; // 行、列、宫格都不冲突，返回 1 表示可以填
 }
 
-void dfs(int n)
+void dfs(int n) // 深度优先搜索：处理第 n 个空格
 {
-    int i;
-    if (num == n) //因为最初是dfs(0)，也就是说如果所有空被填完，就返回
+    int i; // 候选数字变量
+    if (num == n) // 当 n 到达空格总数，说明所有空格都已填好
     {
-        flag = 1;
-        return;
+        flag = 1; // 标记已找到一个可行解
+        return; // 结束递归
     }
 
-    for (i = 1; i <= 9; i++) //分别尝试填入1--9
+    for (i = 1; i <= 9; i++) // 尝试把 1~9 依次填入当前空格
     {
-        if (judge(n, i))
+        if (judge(n, i)) // 若数字 i 放在当前空格合法
         {
-            map[p[n].x][p[n].y] = i;
-            dfs(n + 1); //在第n空的基础上搜索第n+1空
-            if (flag)
-                return;
-            map[p[n].x][p[n].y] = 0; //不行的话，退回原来的状态
+            map[p[n].x][p[n].y] = i; // 先做选择：填入 i
+            dfs(n + 1); // 递归处理下一个空格
+            if (flag) // 若下层已经找到完整解
+                return; // 直接回退退出，不再尝试其他分支
+            map[p[n].x][p[n].y] = 0; // 否则撤销选择：回溯到填之前状态
         }
     }
 }
 
-int main()
+int main() // 程序入口
 {
-    int cas = 0, g, f; // g,f分别代表x,y坐标,cas代表有不同的数独难题，但是，第一次输出是不带回车的
-    char ch1[2];       //为什么要多出一个空间？考虑到输入数据中每个数之间是有空格的
+    int cas = 0, g, f; // cas: 当前是第几组数独；g/f: 行列循环变量
+    char ch1[2]; // 读取单字符(数字或 '?')，留 1 位给字符串结束符 '\0'
 
-    while (scanf("%s", ch1) != EOF) //每次读入一个数
+    while (scanf("%s", ch1) != EOF) // 持续读入，直到文件结束
     {
-        num = 0;
-        flag = 0;
+        num = 0; // 每组新题开始时，空格计数清零
+        flag = 0; // 每组新题开始时，解状态清零
 
-        //这里，由于while循环里面已经有了一次读数，所以对第一次读数必须单独对待
-        if (ch1[0] != '?')
+        if (ch1[0] != '?') // 先单独处理 map[0][0] (因为 while 已经提前读了一个)
         {
-            map[0][0] = ch1[0] - '0';
+            map[0][0] = ch1[0] - '0'; // 字符数字转整数
         }
-        else
+        else // 若首格是空
         {
-            p[num].x = p[num].y = 0;
-            num++;
-            map[0][0] = 0;
+            p[num].x = p[num].y = 0; // 记录首个空格坐标
+            num++; // 空格总数 +1
+            map[0][0] = 0; // 用 0 表示该位置待填
         }
 
-        for (g = 0; g < 9; g++)
+        for (g = 0; g < 9; g++) // 按行读取其余 80 个格子
         {
-            for (f = 0; f < 9; f++)
+            for (f = 0; f < 9; f++) // 按列读取每行格子
             {
-                if ((g != 0 || f != 0))
+                if ((g != 0 || f != 0)) // 跳过已处理过的 map[0][0]
                 {
-                    scanf("%s", ch1);
-                    if (ch1[0] != '?')
-                        map[g][f] = ch1[0] - '0'; //将字符串存储的棋盘转换为二维数组存储
-                    else
+                    scanf("%s", ch1); // 读取一个输入单元
+                    if (ch1[0] != '?') // 若是已知数字
+                        map[g][f] = ch1[0] - '0'; // 直接存入棋盘
+                    else // 若是空格
                     {
-                        map[g][f] = 0;
-                        p[num].x = g;
-                        p[num].y = f;
-                        num++;
+                        map[g][f] = 0; // 先置 0
+                        p[num].x = g; // 记录该空格行坐标
+                        p[num].y = f; // 记录该空格列坐标
+                        num++; // 空格总数 +1
                     }
                 }
             }
         }
 
-        if (cas)
-            printf("\n");
-        cas++;
-        dfs(0); //深度优先搜索
+        if (cas) // 若不是第一组题
+            printf("\n"); // 输出空行分隔不同测试用例
+        cas++; // 用例计数加一
+        dfs(0); // 从第 0 个空格开始回溯求解
 
-        //输出
-        for (g = 0; g < 9; g++)
+        for (g = 0; g < 9; g++) // 输出 9 行结果
         {
-            for (f = 0; f < 9; f++)
+            for (f = 0; f < 9; f++) // 输出每行 9 列
             {
-                if (f == 0)
-                    printf("%d", map[g][f]);
-                else
-                    printf(" %d", map[g][f]); //对输出数据空格的常规性处理
+                if (f == 0) // 每行第一个数字前不加空格
+                    printf("%d", map[g][f]); // 直接输出数字
+                else // 其余数字前加一个空格
+                    printf(" %d", map[g][f]); // 保持题目要求的输出格式
             }
-            printf("\n");
+            printf("\n"); // 每行结束换行
         }
     }
 
-    return 0;
+    return 0; // 正常结束程序
 }
