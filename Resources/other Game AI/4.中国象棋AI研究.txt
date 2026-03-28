@@ -1,3 +1,80 @@
 正文见以下链接：
 
 https://www.cnblogs.com/tuanzang/archive/2013/02/27/2935743.html
+
+极大极小值算法
+int MiniMax(Position P,int depth){
+    int bestValue,value;
+    if(Gameover){
+        return Evaluation(p);
+    }
+    if(depth <= 0){
+        return Evaluation(p);
+    }
+    if(p.color == RED){
+        bestValue = -MAX;
+    }
+    else bestValue = MAX;
+
+    for(m : possibleMov){
+        MakeMove(m);
+        value = MiniMax(p,depth - 1);
+        unMakeMove(m);
+        if(p.color == RED){
+            bestValue = max(value,bestValue);
+        }
+        else bestValue = min(value,bestValue);
+    }
+
+    return bestValue;
+}
+
+负极大值法：
+int NegaMax(Position P,int depth){
+    int bestValue,value;
+
+    if(Gameover)return Evaluation(p);
+    if(depth <= 0)return Evaluation;
+    bestValue = -MAX;
+
+    for(m : possibleMov){
+        MakeMove(m);
+        value = -MiniMax(p,depth - 1);
+        unMakeMove(m);
+        bestValue = max(value,bestValue);
+    }
+
+    return bestValue;
+}
+
+// Negamax 形式的 Alpha-Beta 剪枝
+int AlphaBeta(Position P, int depth, int alpha, int beta) {
+    int score;  // 保存每个子节点返回的分数
+
+    // 终局：如果棋局结束，直接静态评估并返回
+    if (Gameover(P)) return Evaluation(P);
+
+    // 到达搜索深度上限：不再向下展开，直接评估当前局面
+    if (depth <= 0) return Evaluation(P);
+
+    // 枚举当前局面的所有合法走法
+    for (Move m in GenerateMoves(P)) {
+        MakeMove(P, m);  // 执行走法，进入子局面
+
+        // 递归搜索子节点：
+        // 1) 对手视角的分数取负号（Negamax 核心）
+        // 2) 窗口也要对称翻转为 [-beta, -alpha]
+        score = -AlphaBeta(P, depth - 1, -beta, -alpha);
+
+        UnmakeMove(P, m);  // 撤销走法，恢复原局面
+
+        // 用子节点分数提升当前节点下界 alpha
+        if (score > alpha) alpha = score;
+
+        // 剪枝：当前下界已经不小于上界，后续兄弟节点不可能影响结果
+        if (alpha >= beta) break;
+    }
+
+    // 返回当前节点在窗口内可保证的最好分数（下界）
+    return alpha;
+}
