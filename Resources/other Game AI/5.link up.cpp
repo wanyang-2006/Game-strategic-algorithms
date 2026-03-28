@@ -1,6 +1,6 @@
-#include <iostream> // C++ 输入输出库
-#include <queue>    // 使用 STL 中的 queue 容器实现 BFS
-#include <cstdio>   // 使用 scanf/puts 等 C 风格 IO
+#include <iostream> 
+#include <queue>    
+#include <cstdio>   
 using namespace std;
 
 const int N = 1001; // 棋盘尺寸上限（为安全分配较大数组）
@@ -9,11 +9,11 @@ bool flag; // 最终是否找到符合条件的连通路径（YES/NO）
 
 int n, m, sx, sy, ex, ey; // 棋盘行数n，列数m，查询起点(sx,sy)和终点(ex,ey)
 
-int hash_[N][N], map[N][N]; // map[][]: 棋盘格子上的值（0 表示空），hash[][]: 到达某格子的最少转弯次数上限/记录
+int hash_[N][N], map[N][N]; 
+// map[][]: 棋盘格子上的值（0 表示空），hash[][]: 到达某格子的最少转弯次数上限/记录
 // 说明：hash[][] 用于剪枝和记录到达某格子时用到的最少拐点数（turn）。初始化为较大数，只有当
 // 当前路径的转弯数 t.turn 小于等于 hash[x][y] 时才入队并更新 hash[x][y]=t.turn。
 
-// 四个方向：下、右、上、左（与原程序中一致）
 int dir[4][2] = {{1,0},{0,1},{-1,0},{0,-1}};
 
 struct node {
@@ -22,7 +22,7 @@ struct node {
   int d;       // 当前进入该点时的方向（0..3）
 } start;
 
-queue<node> q; // BFS 队列，存储待扩展的节点
+queue<node> q; 
 
 // 判断节点是否在棋盘内
 inline bool in(const node &p) {
