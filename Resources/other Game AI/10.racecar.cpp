@@ -5,11 +5,11 @@
   3) 重复大量次随机实验，取出现过的最大放置数量作为答案近似值。
 */
 
-#include <iostream.h>  // 输入输出
+#include <iostream>    // 输入输出
 #include <fstream>     // 保留原始头文件（本程序未使用）
 #include <time.h>      // time() 用于随机种子
 #include <stdlib.h>    // 标准库（本程序几乎未显式使用）
-
+using namespace std;
 // 线性同余随机数参数：new_seed = multiplier * old_seed + adder
 const unsigned long multiplier = 1194211693L;
 const unsigned long adder = 12345L;
