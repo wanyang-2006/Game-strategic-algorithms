@@ -1,6 +1,6 @@
-#include <iostream> // 引入输入输出库，用于调试或扩展（此程序使用 C 风格 IO）
-#include <queue> // 使用 STL 的队列容器来实现 BFS
-using namespace std; // 使用 std 命名空间，便于书写
+#include <iostream> 
+#include <queue>
+using namespace std;
 
 // 定义用于 BFS 的节点结构体：包含坐标、已连的长度、方向标记和是否经过空点标志
 struct Node {
@@ -19,8 +19,8 @@ int dir[4][2] = {{0,1}, {1,0}, {1,-1}, {1,1}};
 // BFS 搜索函数：从 (x,y) 出发，判断是否存在恰好五子连成一线的情况
 // 注意：本算法允许在连线中使用一次空位（'.'）作为延伸，但不能超过一次
 bool bfs(int x, int y) {
-    queue<Node> Q;       // 用队列实现广度优先搜索
-    Node first, next;    // first 为当前出队节点，next 为要入队的下一个节点
+    queue<Node> Q;       
+    Node first, next;    
     int i;
 
     // 初始化起点为 (x,y)
