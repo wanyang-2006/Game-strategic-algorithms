@@ -1,0 +1,103 @@
+
+
+
+
+
+<html><head>
+  <title>登录 - 象棋巫师用户中心</title>
+  <script type="text/javascript" src="/js/jquery.js"></script>
+</head><body bgcolor="#3869B6" topmargin="0" leftmargin="0" bottommargin="0" rightmargin="0">
+  <table cellpadding="8" cellspacing="0" width="100%"><tbody><tr>
+    <td>&nbsp;</td>
+    <td width="750" bgcolor="white" nowrap>
+      <table cellpadding="4" cellspacing="0" width="100%"><tbody><tr>
+        <td background="/images/topbg.gif"><table cellpadding="0" cellspacing="0" width="100%"><tbody><tr>
+          <td valign="bottom" nowrap width="0%">
+            <table><tbody><tr><td nowrap>
+              <img src="/images/wizard.jpg" width="64" height="64">
+              <font size="6" color="white" face="黑体">象棋巫师用户中心</font>
+            </td></tr></tbody></table>
+          </td>
+          <td align="right" valign="bottom" width="100%">
+            <table><tbody><tr>
+              <td align="right"><font size="5">&nbsp;</font></td>
+            </tr><tr>
+              <td align="right"><a href="https://www.xqbase.com/" target="_blank"><img
+                  src="/images/xqbase.gif" border="0"></a></td>
+            </tr><tr>
+              <td algin="right"><a href="https://www.xqbase.com/" target="_blank"><font
+                  size="2" color="white" face="Arial"><b>www.xqbase.com</b></font></a></td>
+            </tr></tbody></table>
+          </td>
+        </tr></tbody></table></td>
+      </tr><tr>
+        <td>&nbsp;</td>
+      </tr>
+<tr><td background="/images/headerbg.gif"><b>登录</b></td></tr><tr><td bgcolor="#EEEEEE">
+  
+  <p align="center"><input type="button" id="register" value="　注册帐号　"
+      style="padding:4px;font-size:14px" onclick="location.href=&quot;?cmd=register&quot;"></p>
+  <form action="?cmd=login" method="POST">
+    <table align="center"><tbody>
+      <tr><td width="280" align="right"><font size="2">用户名:</font><td><font size="2" color="red"><sup>*</sup></font></td><td width="440"><font size="2">
+        <input type="text" name="username" id="username" value="" size="20">
+        <a href="?cmd=register" tabindex="-1">注册帐号</a>
+        <a href="https://api.weibo.com/oauth2/authorize?client_id=323436556&amp;redirect_uri=https%3A%2F%2Fwww.xqbase.com%2Fusers%2F" tabindex="-1">用微博登录</a>
+      </font></td></tr>
+      <tr><td align="right" valign="top"><font size="2">密码:</font><td valign="top"><font size="2" color="red"><sup>*</sup></font></td><td valign="top"><font size="2">
+        <input type="password" name="password" id="password" size="20">
+        <a href="?cmd=getpassword" id="login" tabindex="-1">忘记密码</a><br>
+        <input type="checkbox" name="save" id="save" checked><label for="save">两周内不用再登录</label>
+      </font></td></tr>
+    </tbody></table>
+    <p align="center"><input type="submit" value="　　登录　　" style="padding:4px;font-size:14px"></p>
+  </form>
+  <script type="text/javascript"><!--
+    var username = $("#username")
+    if (username.val() == "") {
+      username.focus();
+    } else {
+      $("#password").focus();
+    }
+  --></script>
+</td></tr>
+
+      <tr>
+        <td bgcolor="#DDDDDD" align="right"><table cellpadding="0" cellspacing="0" width="100%"><tbody><tr>
+          <td><font size="2">
+            <span><a
+                href="/users/?cmd=suggest&amp;referer=users"
+                target="_blank" style="color:#000066">意见反馈</a></span>
+          </font></td>
+          <td align="right"><font size="2" color="#000066">
+            <a href="https://beian.miit.gov.cn/"
+                target="_blank">沪<font face="Arial">ICP</font>备<font face="Arial">10042093</font>号<font face="Arial">-1</font></a>
+            <font face="Arial">&copy; 2024&nbsp;</font>象棋百科全书网
+          </font></td>
+        </tr></tbody></table></td>
+      </tr></tbody></table>
+    </td>
+    <td>&nbsp;</td>
+  </tr></tbody></table>
+  <script type="text/javascript"><!--
+
+var PING_INTERVAL = 45000;
+
+function ping() {
+	$.ajax({
+		url: "/ping.jsp",
+		method: "POST",
+		dataType: "text",
+		success: function() {
+			setTimeout(ping, PING_INTERVAL);
+		},
+		error: function() {
+			setTimeout(ping, 1000);
+		}
+	});
+}
+
+setTimeout(ping, PING_INTERVAL);
+
+  --></script> 
+</body></html>
