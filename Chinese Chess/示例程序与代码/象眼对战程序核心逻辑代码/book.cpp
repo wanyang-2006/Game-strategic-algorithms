@@ -24,6 +24,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #include "book.h"
 
 // 从开局库中获取当前局面的建议着法
+<<<<<<< Updated upstream
 // pos: 传入当前的棋局局面对象引用
 // szBookFile: 开局库的文件路径字符串
 // lpbks: 用于接收从开局库中找到的所有建议着法的结构体数组指针
@@ -37,10 +38,21 @@ int GetBookMoves(const PositionStruct &pos, const char *szBookFile, BookStruct *
 
   // 尝试打开开局库文件
   // 若打开失败(文件不存在或无法读取)则返回0，表示在库中没有找到着法
+=======
+int GetBookMoves(const PositionStruct &pos, const char *szBookFile, BookStruct *lpbks) {
+  BookFileStruct BookFile;
+  PositionStruct posScan;
+  BookStruct bk;
+  int nScan, nLow, nHigh, nPtr;
+  int i, j, nMoves;
+
+  // 尝试打开开局库文件
+>>>>>>> Stashed changes
   if (!BookFile.Open(szBookFile)) {
     return 0; // 若打开失败则返回0个着法
   }
 
+<<<<<<< Updated upstream
   posScan = pos; // 将传入的当前局面拷贝给用于扫描的临时局面
   // nScan用于控制扫描的轮次: 第一轮(0)扫描原局面，第二轮(1)扫描轴对称镜像局面
   // 因为有些开局在棋盘左右镜像是等价的，为了节省库空间能复用这些对称局面
@@ -69,27 +81,72 @@ int GetBookMoves(const PositionStruct &pos, const char *szBookFile, BookStruct *
   }
 
   // 如果两次查找(原局面和镜像局面)都没有找到匹配的开局记录
+=======
+  posScan = pos;
+  // nScan用于扫描原局面与轴对称镜像局面（有些开局是对称的）
+  for (nScan = 0; nScan < 2; nScan ++) {
+    nPtr = nLow = 0;
+    nHigh = BookFile.nLen - 1;
+    // 使用二分查找在开局库快速定位当前的 Zobrist 哈希锁
+    while (nLow <= nHigh) {
+      nPtr = (nLow + nHigh) / 2;
+      BookFile.Read(bk, nPtr); // 读出中间元素的局面哈希键
+      if (BOOK_POS_CMP(bk, posScan) < 0) {
+        nLow = nPtr + 1;       // 库中数据偏小，向右半区查找
+      } else if (BOOK_POS_CMP(bk, posScan) > 0) {
+        nHigh = nPtr - 1;      // 库中数据偏大，向左半区查找
+      } else {
+        break;                 // 找到了对应的局面
+      }
+    }
+    // 如果找到了匹配项，则退出循环
+    if (nLow <= nHigh) {
+      break;
+    }
+    // 未找到原局面，将局面进行左右镜像翻转，准备第二次查找镜像局面
+    posScan.Mirror();
+  }
+
+  // 两次查找都没有找到匹配的开局局面
+>>>>>>> Stashed changes
   if (nScan == 2) {
     BookFile.Close(); // 关闭开局库文件以释放资源
     return 0;         // 返回0个着法
   }
+<<<<<<< Updated upstream
   // 确保找到的指针 nPtr 在合法范围内(防止文件读取越界)
   __ASSERT_BOUND(0, nPtr, BookFile.nLen - 1);
 
   // 因为开局库中同一局面可能有多种不同的建议走法，它们在库中紧挨着存放
   // 这里需要向前回退寻找第一个匹配当前局面的条目起点
+=======
+  // 确保指针在合法范围内
+  __ASSERT_BOUND(0, nPtr, BookFile.nLen - 1);
+
+  // 向前搜索第一个匹配当前局面的条目起点（库中相同局面的不同走法一般存放在一起）
+>>>>>>> Stashed changes
   for (nPtr --; nPtr >= 0; nPtr --) {
     BookFile.Read(bk, nPtr); // 往前读一条记录
     if (BOOK_POS_CMP(bk, posScan) < 0) {
+<<<<<<< Updated upstream
       break; // 如果上一条记录的哈希值已经小于当前局面（不匹配了），则搜索终止
     }
   }
 
   nMoves = 0; // 初始化检索出来的可用着法数量计数量为0
   // 从确认的第一个匹配的条目开始(所以将倒推一格的nPtr再+1)，往后连续读取所有该局面的走法
+=======
+      break; // 如果已经不是当前局面了，搜索终止
+    }
+  }
+
+  nMoves = 0; // 初始化检索出来的着法数量
+  // 从第一个匹配的条目开始往后遍历，存入候选着法列表
+>>>>>>> Stashed changes
   for (nPtr ++; nPtr < BookFile.nLen; nPtr ++) {
     BookFile.Read(bk, nPtr); // 往后读取每一条开局记录
     if (BOOK_POS_CMP(bk, posScan) > 0) {
+<<<<<<< Updated upstream
       break; // 如果条目哈希值已经大于当前目标局面了，说明越过了目标局面的记录区，结束遍历
     }
     // 检查库中记录的着法 (bk.wmv) 在当前局面下是否确实符合象棋规则 (合法着法)
@@ -101,6 +158,18 @@ int GetBookMoves(const PositionStruct &pos, const char *szBookFile, BookStruct *
       lpbks[nMoves].wvl = bk.wvl; // 装载该走法的开局权重/价值分数 (数值越大通常越是被推荐的走法)
       nMoves ++; // 有效着法数加1
       // 为防止写入结果的数组溢出，当着法数达到定义的最大生成走法上限 MAX_GEN_MOVES 时强行终止解析
+=======
+      break; // 越过了目标局面的记录区，结束遍历
+    }
+    // 检查库中记录的着法在当前局面下是否合法
+    if (posScan.LegalMove(bk.wmv)) {
+      lpbks[nMoves].nPtr = nPtr;
+      // 如果检索的是镜像局面（nScan==1），则需要把存的走法镜像反转回来给原局面使用
+      lpbks[nMoves].wmv = (nScan == 0 ? bk.wmv : MOVE_MIRROR(bk.wmv));
+      lpbks[nMoves].wvl = bk.wvl; // 装载价值分/权重
+      nMoves ++;
+      // 为防止溢出，到达候选着法数上限后终止解析
+>>>>>>> Stashed changes
       if (nMoves == MAX_GEN_MOVES) {
         break;
       }
@@ -108,6 +177,7 @@ int GetBookMoves(const PositionStruct &pos, const char *szBookFile, BookStruct *
   }
   BookFile.Close(); // 解析完毕，关闭库文件流释放资源
 
+<<<<<<< Updated upstream
   // 整理找到的开局着法：根据着法的价值(wvl)对建议着法进行冒泡排序（从高到低）
   for (i = 0; i < nMoves - 1; i ++) {
     for (j = nMoves - 1; j > i; j --) {
@@ -117,4 +187,15 @@ int GetBookMoves(const PositionStruct &pos, const char *szBookFile, BookStruct *
     }
   }
   return nMoves; // 最终返回符合条件的推荐开局着法数量
+=======
+  // 根据着法的价值(记录在wvl中)对找到的开局着法进行气泡排序，价值高的走法排前面
+  for (i = 0; i < nMoves - 1; i ++) {
+    for (j = nMoves - 1; j > i; j --) {
+      if (lpbks[j - 1].wvl < lpbks[j].wvl) {
+        SWAP(lpbks[j - 1], lpbks[j]); // 交换元素位置
+      }
+    }
+  }
+  return nMoves; // 返回解析出的合格开局着法数量
+>>>>>>> Stashed changes
 }

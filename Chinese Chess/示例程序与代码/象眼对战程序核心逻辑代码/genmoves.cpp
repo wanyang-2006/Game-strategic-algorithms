@@ -590,45 +590,55 @@ int PositionStruct::GenNonCapMoves(MoveStruct *lpmvs) const {
   }
 
   // 5. 生成车和炮的着法，没有必要判断是否吃到本方棋子
-  for (i = ROOK_FROM; i <= CANNON_TO; i ++) {
+  for (i = ROOK_FROM; i <= CANNON_TO; i ++) { // 遍历顺序是从车起至炮止(涵盖所有车和炮)
     sqSrc = ucsqPieces[nSideTag + i];
     if (sqSrc != 0) {
       __ASSERT_SQUARE(sqSrc);
       x = FILE_X(sqSrc);
       y = RANK_Y(sqSrc);
 
+      // 获取行方向上的滑步范围(左右移动)
       lpsmv = RankMovePtr(x, y);
+      // ucNonCap[0]表示向左滑动不吃子时最远可到达的相对横坐标
       sqDst = lpsmv->ucNonCap[0] + RANK_DISP(y);
       __ASSERT_SQUARE(sqDst);
+      // 从最远空格依次往回遍历，直到原位置（避免跨子等非法横向移动）
       while (sqDst != sqSrc) {
-        __ASSERT(ucpcSquares[sqDst] == 0);
+        __ASSERT(ucpcSquares[sqDst] == 0); // 断言必定为空格
         __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
         lpmvsCurr->dwmv = MOVE(sqSrc, sqDst);
         lpmvsCurr ++;
-        sqDst --;
+        sqDst --; // 这里--代表向右(原位置方向)移动一格
       }
+      // ucNonCap[1]表示向右滑动不吃子时最远可到达的相对横坐标
       sqDst = lpsmv->ucNonCap[1] + RANK_DISP(y);
       __ASSERT_SQUARE(sqDst);
+      // 从右侧最远可达空格往回依次遍历生成合法不吃子着法
       while (sqDst != sqSrc) {
         __ASSERT(ucpcSquares[sqDst] == 0);
         __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
         lpmvsCurr->dwmv = MOVE(sqSrc, sqDst);
         lpmvsCurr ++;
-        sqDst ++;
+        sqDst ++; // 这里++是因为之前是从最右边开始回溯
       }
 
+      // 获取列方向上的滑步范围(上下移动)
       lpsmv = FileMovePtr(x, y);
+      // ucNonCap[0]表示向前(或上)不吃子最远距离
       sqDst = lpsmv->ucNonCap[0] + FILE_DISP(x);
       __ASSERT_SQUARE(sqDst);
+      // 以每16为步长（棋盘Y轴跨度，16x16数组）回溯生成纵向合法移动
       while (sqDst != sqSrc) {
         __ASSERT(ucpcSquares[sqDst] == 0);
         __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
         lpmvsCurr->dwmv = MOVE(sqSrc, sqDst);
         lpmvsCurr ++;
-        sqDst -= 16;
+        sqDst -= 16; 
       }
+      // ucNonCap[1]表示向后(或下)不吃子最远距离
       sqDst = lpsmv->ucNonCap[1] + FILE_DISP(x);
       __ASSERT_SQUARE(sqDst);
+      // 回溯生成着法
       while (sqDst != sqSrc) {
         __ASSERT(ucpcSquares[sqDst] == 0);
         __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
