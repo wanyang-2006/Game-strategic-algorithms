@@ -173,6 +173,18 @@ public:
     static int pos2x(int mpos);
     static int pos2y(int mpos);
     void printBoard();
+
+    //原获取信息接口是private的，需要获取信息添加public的接口
+    void printBoard();
+    // 获取当前棋盘上指定坐标格信息
+    Grid getGrid(int x, int y) const {
+        return state[currTurnId][xy2pos(x, y)];
+    }
+    // 获取当前走棋方颜色
+    colorType getCurrColor() const {
+        return currColor;
+    }
+
 };
 
 void getInputBotzone(Chess& chess);
@@ -890,4 +902,12 @@ bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
     3.α-β剪枝 
     4.使用转置表/哈希表 调用棋谱
 
+*/
+
+//决策实现的算法仅需调用下方三个接口
+
+/*
+1.原代码已经实现了合法步的生成，所以只需要调用void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true) 获取合法所有步
+2.在搜索算法中模拟下一步棋调用bool makeMoveAssumeLegal(const Move& move)
+3.在搜索算法中撤销模拟的棋步调用void undoMove()
 */

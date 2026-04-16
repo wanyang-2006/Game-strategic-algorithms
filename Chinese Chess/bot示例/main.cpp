@@ -177,7 +177,21 @@ public:
     static int pos2x(int mpos);
     static int pos2y(int mpos);
     
+
+
+    //原获取信息接口是private的，需要获取信息添加public的接口
     void printBoard();
+    // 获取当前棋盘上指定坐标格信息
+    Grid getGrid(int x, int y) const {
+        return state[currTurnId][xy2pos(x, y)];
+    }
+    // 获取当前走棋方颜色
+    colorType getCurrColor() const {
+        return currColor;
+    }
+    //
+
+
 };
 
 void getInputBotzone(Chess& chess);
@@ -718,4 +732,238 @@ bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey) {
 // 检查是否在同行/同列/同斜线
 bool Chess::inSameLine(int sx, int sy, int ex, int ey) {
     int dex = ex - sx, dey = ey - sy;
-    return dex == dey || dex == -dey ||
+    return dex == dey || dex == -dey || dex == 0 || dey == 0;
+}
+bool Chess::inSameStraightLine(int sx, int sy, int ex, int ey) {
+    int dex = ex - sx, dey = ey - sy;
+    return dex == 0 || dey == 0;
+}
+bool Chess::inSameObiqueLine(int sx, int sy, int ex, int ey) {
+    int dex = ex - sx, dey = ey - sy;
+    return dex == dey || dex == -dey;
+}
+
+// 测试某一步棋走完之后，己方老将是否依然处于被攻击状态
+bool Chess::isMyKingAttackedAfterMove(const Move &move) {
+    colorType originColor = currColor;
+    // 假设走这一步
+    makeMoveAssumeLegal(move);
+    int kingX = -1, kingY = -1;
+    // 寻找己方老将
+    for (int x = 0; x < BOARDWIDTH; x++) {
+        for (int y = 0; y < BOARDHEIGHT; y++) {
+            auto& curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == originColor && curGrid.type == King) {
+                kingX = x; kingY = y;
+                break;
+            }
+        }
+    }
+    // 检测是否被攻击
+    bool myKingStillAttacked = attacked(oppColor(originColor), kingX, kingY);
+    // 必须撤销状态
+    undoMove();
+    assert(currColor == originColor);
+    return myKingStillAttacked;
+}
+
+bool Chess::isMoveValid(const Move& move, bool mustDefend) {
+    return isLegalMove(move, mustDefend);
+}
+
+// 检查走完这一步是否能赢
+bool Chess::winAfterMove(const Move &move) {
+    makeMoveAssumeLegal(move);
+    vector<Move> oppLegalMoves;
+    generateMoves(oppLegalMoves);
+    undoMove();
+    return oppLegalMoves.empty(); // 对手无步可走我方胜利
+}
+
+bool Chess::currKingAttacked(const Move &move) {
+    int kingX = -1, kingY = -1;
+    for (int x = 0; x < BOARDWIDTH; x++) {
+        for (int y = 0; y < BOARDHEIGHT; y++) {
+            auto& curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == currColor && curGrid.type == King) {
+                kingX = x; kingY = y;
+            }
+        }
+    }
+    return attacked(oppColor(), kingX, kingY);
+}
+
+bool Chess::isOppKingAttackedAfterMove(const Move &move) {
+    colorType originColor = currColor;
+    makeMoveAssumeLegal(move);
+    int kingX = -1, kingY = -1;
+    for (int x = 0; x < BOARDWIDTH; x++) {
+        for (int y = 0; y < BOARDHEIGHT; y++) {
+            auto& curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == oppColor(originColor) && curGrid.type == King) {
+                kingX = x; kingY = y;
+                break;
+            }
+        }
+    }
+    bool oppKingBeingAttacked = attacked(originColor, kingX, kingY);
+    undoMove();
+    assert(currColor == originColor);
+    return oppKingBeingAttacked;
+}
+
+// 超过60步无吃子判和
+bool Chess::exceedMaxPeaceState() {
+    return continuePeaceTurn[currTurnId] >= 60 - 1;
+}
+
+int Chess::xy2pos(int mx, int my) {
+    return my * BOARDWIDTH + mx;
+}
+
+int Chess::pos2x(int mpos) {
+    return mpos % BOARDWIDTH;
+}
+
+int Chess::pos2y(int mpos) {
+    return mpos / BOARDWIDTH;
+}
+
+bool Chess::inKingArea(int mx, int my, colorType mcolor) {
+    assert(mcolor == RED || mcolor == BLACK);
+    if (mcolor == RED) {
+        return mx >= 3 && mx <= 5 && my >= 0 && my <= 2;
+    } else {
+        return mx >= 3 && mx <= 5 && my >= 7 && my <= 9;
+    }
+}
+
+bool Chess::inColorArea(int mx, int my, colorType mcolor) {
+    assert(mcolor == RED || mcolor == BLACK);
+    if (mcolor == RED) {
+        return my <= 4;
+    } else {
+        return my >= 5;
+    }
+}
+
+// 统计起点和终点连线中间的棋子数量（用于炮走棋检测）
+int Chess::betweenNotEmptyNum(int sx, int sy, int ex, int ey) {
+    assert(inSameStraightLine(sx, sy, ex, ey));
+    int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
+    int dey = ey > sy ? 1 : (ey == sy ? 0 : -1);
+    int tx = sx + dex, ty = sy + dey;
+    int retNum = 0;
+    while (inBoard(tx, ty) && !(tx == ex && ty == ey)) {
+        auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
+        if (tGrid.color != EMPTY) {
+            retNum++;
+        }
+        tx += dex; ty += dey;
+    }
+    return retNum;
+}
+
+colorType Chess::oppColor(colorType mcolor) {
+    return mcolor == RED ? BLACK : RED;
+}
+
+// 撤销上一步操作
+void Chess::undoMove() {
+    if (currTurnId == 0) {
+        return;
+    }
+    state.pop_back(); // 将棋盘状态回退一层
+    currTurnId--;
+    currColor = oppColor();
+    continuePeaceTurn.pop_back();
+    lastMoveEaten.pop_back();
+}
+
+// 生成遵守“禁止长将/长捉等重复局面”的合法步
+void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend) {
+    vector<Move> firstMoves;
+    generateMoves(firstMoves, mustDefend);
+    legalMoves.clear();
+    for (const auto& move : firstMoves) {
+        // 如果此步没有导致重复死循环，则加入合法列表
+        if (!repeatAfterMove(move)) {
+            legalMoves.push_back(move);
+        }
+    }
+}
+
+// 检查某个步是否会导致三次重复局面（长将、长捉通常在此处拦截）
+bool Chess::repeatAfterMove(const Move& move) {
+    makeMoveAssumeLegal(move);
+    int tmp_id = currTurnId;
+    // 如果有吃子发生，局面不可逆转，绝不可能重复，直接返回 false
+    if (lastMoveEaten[tmp_id]) {
+        undoMove();
+        return false;
+    }
+    
+    // 向前追溯直到上次吃子或者开局
+    while (true) {
+        if (tmp_id <= 1) {
+            break;
+        }
+        if (lastMoveEaten[tmp_id-2]) {
+            break;
+        }
+        tmp_id -= 2; // 只检查该方走棋的局合
+    }
+    
+    // 统计盘面完全一样的次数
+    int repeatTime = 0;
+    for (int id = currTurnId; id >= tmp_id; id -= 2) {
+        if (state[id] == state[currTurnId]) {
+            repeatTime++;
+        }
+    }
+    undoMove();
+    return repeatTime >= 3; // 达到或超过3次，属于违规重复局面
+}
+
+bool Chess::isLegalMoveWithForbidden(const Move& move, bool mustDefend) {
+    vector<Move> currLegalMoves;
+    generateMovesWithForbidden(currLegalMoves, mustDefend);
+    auto fi_iter = std::find(currLegalMoves.begin(), currLegalMoves.end(), move);
+    return fi_iter != currLegalMoves.end();
+}
+
+void Chess::printBoard() {
+    std::cout << std::endl << "Board" << std::endl;
+    for (int y = 9; y >= 0; y--) {
+        for (int x = 0; x <= 8; x++) {
+            std::cout << stoneSym[state[currTurnId][xy2pos(x,y)].type] << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
+    return isLegalMoveWithForbidden(move, mustDefend);
+}
+
+
+
+//以下为决策实现的算法
+
+//1.原代码已经实现了合法步的生成，所以只需要调用void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true) 获取合法所有步
+//2.在搜索算法中模拟下一步棋调用bool makeMoveAssumeLegal(const Move& move)
+//3.在搜索算法中撤销模拟的棋步调用void undoMove()
+
+
+// 评估函数
+int evaluateBoard(const Chess& chess)
+{
+
+}
+
+
+// alpha-beta 搜索
+int alphaBetaSearch()
+{
+
+}
