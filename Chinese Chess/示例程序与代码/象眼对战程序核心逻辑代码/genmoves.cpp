@@ -40,32 +40,43 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
 // 本模块只涉及到"PositionStruct"中的"sdPlayer"、"ucpcSquares"和"ucsqPieces"三个成员，故省略前面的"this->"
 
-// 棋子保护判断
+// 棋子保护判断 如果棋子受到其它棋子保护，后续会降低评分
 bool PositionStruct::Protected(int sd, int sqSrc, int sqExcept) const {
-  // 参数"sqExcept"表示排除保护的棋子(指格子编号)，考虑被牵制子的保护时，需要排除牵制目标子的保护
+  // 参数说明: sd为保护方标志; sqSrc是被保护(判定)的棋子格子编号; sqExcept是排除产生保护计算的格子编号(常用于牵制逻辑)
   int i, sqDst, sqPin, pc, x, y, nSideTag;
   SlideMaskStruct *lpsmsRank, *lpsmsFile;
-  // 棋子保护判断包括以下几个步骤：
-
+  
+  // 校验目标格子是否在有效得棋盘范围内
   __ASSERT_SQUARE(sqSrc);
+  
+  // 获取保护方的掩码(用于位运算和数组偏移)
   nSideTag = SIDE_TAG(sd);
+  
+  // 如果被保护的棋子在己方半场(包含九宫)
   if (HOME_HALF(sqSrc, sd)) {
+    // 如果此子处于己方九宫内
     if (IN_FORT(sqSrc)) {
 
-      // 1. 判断受到帅(将)的保护
+      // 1. 判断是否受到帅(将)的保护
+      // 获取帅(将)的位置
       sqDst = ucsqPieces[nSideTag + KING_FROM];
+      // 如果帅(将)存在并且不是被排除计算的那个子
       if (sqDst != 0 && sqDst != sqExcept) {
+        // 断言帅(将)所在格子合法
         __ASSERT_SQUARE(sqDst);
+        // 如果帅(将)能够直接走到被保护子格(即跨度合法)，说明受帅(将)保护
         if (KING_SPAN(sqSrc, sqDst)) {
           return true;
         }
       }
 
-      // 2. 判断受到仕(士)的保护
+      // 2. 判断是否受到仕(士)的保护
+      // 遍历己方的两枚仕(士)
       for (i = ADVISOR_FROM; i <= ADVISOR_TO; i ++) {
         sqDst = ucsqPieces[nSideTag + i];
         if (sqDst != 0 && sqDst != sqExcept) {
           __ASSERT_SQUARE(sqDst);
+          // 如果仕(士)的位置跨度等于1，说明可以走到且提供保护
           if (ADVISOR_SPAN(sqSrc, sqDst)) {
             return true;
           }
@@ -73,11 +84,14 @@ bool PositionStruct::Protected(int sd, int sqSrc, int sqExcept) const {
       }
     }
 
-    // 3. 判断受到相(象)的保护
+    // 3. 判断是否受到相(象)的保护
+    // 遍历己方的两枚相(象)
     for (i = BISHOP_FROM; i <= BISHOP_TO; i ++) {
       sqDst = ucsqPieces[nSideTag + i];
       if (sqDst != 0 && sqDst != sqExcept) {
         __ASSERT_SQUARE(sqDst);
+        // 判断相(象)走到目标格是否合法（跨度是否符合“田”字）,
+        // 且象眼位置(两点中间格)上必须为空（没有塞象眼）
         if (BISHOP_SPAN(sqSrc, sqDst) && ucpcSquares[BISHOP_PIN(sqSrc, sqDst)] == 0) {
           return true;
         }
@@ -85,12 +99,13 @@ bool PositionStruct::Protected(int sd, int sqSrc, int sqExcept) const {
     }
   } else {
 
-    // 4. 判断受到过河兵(卒)横向的保护
+    // 如果不在己方半区(即已经过河)，判断受到横向兵(卒)保护
+    // 4. 判断受到过河兵(卒)横向的保护 (因为兵只能向前或横着走)，检查被保护子的左边(sqDst=sqSrc-1)和右边(sqDst=sqSrc+1)格
     for (sqDst = sqSrc - 1; sqDst <= sqSrc + 1; sqDst += 2) {
-      // 如果棋子在边线，那么断言不成立
-      // __ASSERT_SQUARE(sqDst);
       if (sqDst != sqExcept) {
+        // 如果棋子未越出边界并找到对应格子中的棋子
         pc = ucpcSquares[sqDst];
+        // 如果格子里棋子属于保护方，且并且至少是兵(卒)(兵兵编号是从PAWN_FROM开始)
         if ((pc & nSideTag) != 0 && PIECE_INDEX(pc) >= PAWN_FROM) {
           return true;
         }
@@ -98,43 +113,54 @@ bool PositionStruct::Protected(int sd, int sqSrc, int sqExcept) const {
     }
   }
 
-  // 5. 判断受到兵(卒)纵向的保护
+  // 5. 判断是否受到兵(卒)纵向的保护
+  // 计算如果有一个兵能在后方保护当前格子(只看后一格)
   sqDst = SQUARE_BACKWARD(sqSrc, sd);
-  // 如果棋子在底线，那么断言不成立
-  // __ASSERT_SQUARE(sqDst);
   if (sqDst != sqExcept) {
     pc = ucpcSquares[sqDst];
+    // 如果后一格子里的子是我方的兵(卒)，说明受到兵的纵向保护
     if ((pc & nSideTag) != 0 && PIECE_INDEX(pc) >= PAWN_FROM) {
       return true;
     }
   }
 
   // 6. 判断受到马的保护
+  // 遍历己方的所有马
   for (i = KNIGHT_FROM; i <= KNIGHT_TO; i ++) {
     sqDst = ucsqPieces[nSideTag + i];
     if (sqDst != 0 && sqDst != sqExcept) {
       __ASSERT_SQUARE(sqDst);
-      sqPin = KNIGHT_PIN(sqDst, sqSrc); // 注意，sqSrc和sqDst是反的！
+      // 计算马跳到受保护子所需的“马腿”格(也就是所谓的牵制格，如果马能跳过去的话)
+      sqPin = KNIGHT_PIN(sqDst, sqSrc); 
+      // 验证马能跳过去(不是在原地打转)且马腿(蹩马腿的格子)上没有棋子！
       if (sqPin != sqDst && ucpcSquares[sqPin] == 0) {
         return true;
       }
     }
   }
 
+  // 取被保护子所在的列(X=FILE_X)和行(Y=RANK_Y)
   x = FILE_X(sqSrc);
   y = RANK_Y(sqSrc);
+  // 获取列和行上的滑动攻击掩码指针(查表优化算法，看这个位置能被车或炮如何击中)
   lpsmsRank = RankMaskPtr(x, y);
   lpsmsFile = FileMaskPtr(x, y);
 
-  // 7. 判断受到车的保护，参阅"position.cpp"里的"CheckedBy()"函数
+  // 7. 判断受到车的保护
   for (i = ROOK_FROM; i <= ROOK_TO; i ++) {
     sqDst = ucsqPieces[nSideTag + i];
+    // 如果存在我方车、且不是被保护子本身、也不是排除计算的那个子
     if (sqDst != 0 && sqDst != sqSrc && sqDst != sqExcept) {
+      // 检查车是否同在该列(FILE)中
       if (x == FILE_X(sqDst)) {
+        // 使用预存的Mask阵位直接做位运算：判断此车能否吃/保护到被护子位置(利用位行位列图查询是否存在阻挡子)
         if ((lpsmsFile->wRookCap & PreGen.wBitFileMask[sqDst]) != 0) {
           return true;
         }
-      } else if (y == RANK_Y(sqDst)) {
+      } 
+      // 检查车是否同在该行(RANK)中
+      else if (y == RANK_Y(sqDst)) {
+        // 使用预存的Mask阵位查询，此车在此行内能否护住该位置(即中间无阻挡)
         if ((lpsmsRank->wRookCap & PreGen.wBitRankMask[sqDst]) != 0) {
           return true;
         }
@@ -142,21 +168,29 @@ bool PositionStruct::Protected(int sd, int sqSrc, int sqExcept) const {
     }
   }
 
-  // 8. 判断受到炮的保护，参阅"position.cpp"里的"CheckedBy()"函数
+  // 8. 判断受到炮的保护
   for (i = CANNON_FROM; i <= CANNON_TO; i ++) {
     sqDst = ucsqPieces[nSideTag + i];
+    // 如果存在我方炮、不是被保护子本身、也不是被排除的子
     if (sqDst && sqDst != sqSrc && sqDst != sqExcept) {
+      // 如果处于同列
       if (x == FILE_X(sqDst)) {
+        // 利用位预存表去检查，被保护子和该炮之间是不是有且刚好有一个“炮架子”（这样才形成炮打过来的保护线路）
         if ((lpsmsFile->wCannonCap & PreGen.wBitFileMask[sqDst]) != 0) {
           return true;
         }
-      } else if (y == RANK_Y(sqDst)) {
+      } 
+      // 如果处于同行
+      else if (y == RANK_Y(sqDst)) {
+        // 同样检查行掩码，确认是否同行恰好隔了一子形成保护
         if ((lpsmsRank->wCannonCap & PreGen.wBitRankMask[sqDst]) != 0) {
           return true;
         }
       }
     }
   }
+  
+  // 没有任何我方的兵种能够保护该格子上的子，返回false
   return false;
 }
 
@@ -173,11 +207,21 @@ bool PositionStruct::Protected(int sd, int sqSrc, int sqExcept) const {
  */
 int PositionStruct::MvvLva(int sqDst, int pcCaptured, int nLva) const {
   int nMvv, nLvaAdjust;
+  // 获取被吃子的基础价值（简单价值，例如将帅=5，车=4，马炮=3等）
   nMvv = SIMPLE_VALUE(pcCaptured);
+  
+  // 判断目标格(sqDst)上的被吃子是否受到对方(OPP_SIDE(sdPlayer))的保护
+  // 如果受到保护，则将被吃子的LVA（攻击子价值）记录下来，否则记为0
   nLvaAdjust = (Protected(OPP_SIDE(sdPlayer), sqDst) ? nLva : 0);
+  
+  // 如果被吃掉的棋子价值(nMvv)大于或等于攻击方的调整价值(nLvaAdjust)
+  // 说明吃子是赚的（或至少不亏），返回计算后的得分（加1以保证结果大于0）
   if (nMvv >= nLvaAdjust) {
     return nMvv - nLvaAdjust + 1;
   } else {
+    // 如果吃子表面上是亏的（例如兵吃车受保护，但此时nMvv<nLvaAdjust）
+    // 判断被吃子是否有较高战术价值（nMvv >= 3 即车、马、炮）
+    // 或者该位置在本方半场（可能是必须消除的威胁），如果是则返回1，否则返回0表示不值得考虑
     return (nMvv >= 3 || HOME_HALF(sqDst, sdPlayer)) ? 1 : 0;
   }
 }
@@ -207,19 +251,20 @@ int PositionStruct::GenCapMoves(MoveStruct *lpmvs) const {
       __ASSERT_SQUARE(sqDst);
       // 找到一个着法后，首先判断吃到的棋子是否是对方棋子，技巧是利用"nOppSideTag"的标志(16和32颠倒)，
       // 如果是对方棋子，则保存MVV(LVA)值，即如果被吃子无保护，则只记MVV，否则记MVV-LVA(如果MVV>LVA的话)。
-      pcCaptured = ucpcSquares[sqDst];
+      pcCaptured = ucpcSquares[sqDst];               //获取即将走到的目标格子
       if ((pcCaptured & nOppSideTag) != 0) {
-        __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
-        lpmvsCurr->wmv = MOVE(sqSrc, sqDst);
-        lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 5); // 帅(将)的价值是5
-        lpmvsCurr ++;
+        __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));       //是否符合走子规则
+        lpmvsCurr->wmv = MOVE(sqSrc, sqDst);           //将吃子动作 存入当前的看法列表指针lpmvsCurr指向的结构体中
+        lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 5); // 帅(将)的价值是5(自身的子力价值) 
+        lpmvsCurr ++;                    
       }
-      lpucsqDst ++;
-      sqDst = *lpucsqDst;
+      lpucsqDst ++;         //下一个能走的方向
+      sqDst = *lpucsqDst;   //拿到下一个目标格子的编号
     }
   }
 
   // 2. 生成仕(士)的着法
+  
   for (i = ADVISOR_FROM; i <= ADVISOR_TO; i ++) {
     sqSrc = ucsqPieces[nSideTag + i];
     if (sqSrc != 0) {
@@ -366,26 +411,30 @@ int PositionStruct::GenCapMoves(MoveStruct *lpmvs) const {
     sqSrc = ucsqPieces[nSideTag + i];
     if (sqSrc != 0) {
       __ASSERT_SQUARE(sqSrc);
+      // 提取炮所在的列(X)与行(Y)
       x = FILE_X(sqSrc);
       y = RANK_Y(sqSrc);
 
+      // 获取行移动预置掩码
       lpsmv = RankMovePtr(x, y);
+      // 炮在横向上吃到的第一个子（左方向隔子打）
       sqDst = lpsmv->ucCannonCap[0] + RANK_DISP(y);
       __ASSERT_SQUARE(sqDst);
       if (sqDst != sqSrc) {
         pcCaptured = ucpcSquares[sqDst];
-        if ((pcCaptured & nOppSideTag) != 0) {
+        if ((pcCaptured & nOppSideTag) != 0) { // 吃到对方棋子
           __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
           lpmvsCurr->wmv = MOVE(sqSrc, sqDst);
-          lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 3); // 炮的价值是3
+          lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 3); // 炮由于需要炮架，自身价值为3
           lpmvsCurr ++;
         }
       }
+      // 炮在横向上吃到的第二个子（右方向隔子打）
       sqDst = lpsmv->ucCannonCap[1] + RANK_DISP(y);
       __ASSERT_SQUARE(sqDst);
       if (sqDst != sqSrc) {
         pcCaptured = ucpcSquares[sqDst];
-        if ((pcCaptured & nOppSideTag) != 0) {
+        if ((pcCaptured & nOppSideTag) != 0) { // 吃到对方棋子
           __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
           lpmvsCurr->wmv = MOVE(sqSrc, sqDst);
           lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 3); // 炮的价值是3
@@ -393,23 +442,26 @@ int PositionStruct::GenCapMoves(MoveStruct *lpmvs) const {
         }
       }
 
+      // 获取列移动预置掩码
       lpsmv = FileMovePtr(x, y);
+      // 炮在纵向上吃到的第一个子（前方向隔子打）
       sqDst = lpsmv->ucCannonCap[0] + FILE_DISP(x);
       __ASSERT_SQUARE(sqDst);
       if (sqDst != sqSrc) {
         pcCaptured = ucpcSquares[sqDst];
-        if ((pcCaptured & nOppSideTag) != 0) {
+        if ((pcCaptured & nOppSideTag) != 0) { // 吃到对方棋子
           __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
           lpmvsCurr->wmv = MOVE(sqSrc, sqDst);
           lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 3); // 炮的价值是3
           lpmvsCurr ++;
         }
       }
+      // 炮在纵向上吃到的第二个子（后方向隔子打）
       sqDst = lpsmv->ucCannonCap[1] + FILE_DISP(x);
       __ASSERT_SQUARE(sqDst);
       if (sqDst != sqSrc) {
         pcCaptured = ucpcSquares[sqDst];
-        if ((pcCaptured & nOppSideTag) != 0) {
+        if ((pcCaptured & nOppSideTag) != 0) { // 吃到对方棋子
           __ASSERT(LegalMove(MOVE(sqSrc, sqDst)));
           lpmvsCurr->wmv = MOVE(sqSrc, sqDst);
           lpmvsCurr->wvl = MvvLva(sqDst, pcCaptured, 3); // 炮的价值是3
