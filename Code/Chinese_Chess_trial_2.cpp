@@ -17,46 +17,50 @@ using std::cin;
 using std::cout;
 using std::endl;
 
-#define BOARDWIDTH 9
-#define BOARDHEIGHT 10
-enum stoneType {None = 0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7};
-enum colorType {BLACK=0, RED=1, EMPTY = 2};
-int baseLine[2] = {9, 0};
-char stoneSym[] = "*kbnrpca";
+#define BOARDWIDTH 9 // 棋盘宽度
+#define BOARDHEIGHT 10 // 棋盘高度
+enum stoneType {None = 0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7}; // 棋子类型枚举
+enum colorType {BLACK=0, RED=1, EMPTY = 2}; // 阵营颜色枚举
+int baseLine[2] = {9, 0}; // 红黑双方的底线Y坐标
+char stoneSym[] = "*kbnrpca"; // 棋子类型对应的字符表示
 map<char,stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King},
                                {stoneSym[2], Bishop}, {stoneSym[3], Knight},
                                {stoneSym[4], Rook}, {stoneSym[5], Pawn},
-                               {stoneSym[6], Cannon}, {stoneSym[7], Assistant}};
+                               {stoneSym[6], Cannon}, {stoneSym[7], Assistant}}; // 字符到棋子类型的映射枚举
 
-int dx[] = {-1,-1,-1,0,0,1,1,1};
-int dy[] = {-1,0,1,-1,1,-1,0,1};
-int dx_ob[] = {-1,1,-1,1};
-int dy_ob[] = {-1,-1,1,1};
-int dx_strai[] = {-1,0,0,1};
-int dy_strai[] = {0,-1,1,0};
-int dx_lr[] = {-1,1};
-int dx_knight[] = {-2,-2,-1,-1,1,1,2,2};
-int dy_knight[] = {-1,1,-2,2,-2,2,-1,1};
-int dx_knight_foot[] = {-1,-1,0,0,0,0,1,1};
-int dy_knight_foot[] = {0,0,-1,1,-1,1,0,0};
-int dx_bishop[] = {-2,-2,2,2};
-int dy_bishop[] = {-2,2,-2,2};
-int dx_bishop_eye[] = {-1,-1,1,1};
-int dy_bishop_eye[] = {-1,1,-1,1};
+int dx[] = {-1,-1,-1,0,0,1,1,1}; // 8个方向的X轴偏移（通用）
+int dy[] = {-1,0,1,-1,1,-1,0,1}; // 8个方向的Y轴偏移（通用）
+int dx_ob[] = {-1,1,-1,1}; // 士（仕）的斜向X轴偏移（4个对角方向）
+int dy_ob[] = {-1,-1,1,1}; // 士（仕）的斜向Y轴偏移（4个对角方向）
+int dx_strai[] = {-1,0,0,1}; // 直线的X轴偏移（上下左右）
+int dy_strai[] = {0,-1,1,0}; // 直线的Y轴偏移（上下左右）
+int dx_lr[] = {-1,1}; // 兵（卒）过河后的左右X轴偏移
+int dx_knight[] = {-2,-2,-1,-1,1,1,2,2}; // 马走“日”目的地的X轴偏移
+int dy_knight[] = {-1,1,-2,2,-2,2,-1,1}; // 马走“日”目的地的Y轴偏移
+int dx_knight_foot[] = {-1,-1,0,0,0,0,1,1}; // 马走“日”对应的蹩马腿检查点X轴偏移
+int dy_knight_foot[] = {0,0,-1,1,-1,1,0,0}; // 马走“日”对应的蹩马腿检查点Y轴偏移
+int dx_bishop[] = {-2,-2,2,2}; // 象（相）走“田”目的地的X轴偏移
+int dy_bishop[] = {-2,2,-2,2}; // 象（相）走“田”目的地的Y轴偏移
+int dx_bishop_eye[] = {-1,-1,1,1}; // 象（相）走“田”对应的塞象眼检查点X轴偏移
+int dy_bishop_eye[] = {-1,1,-1,1}; // 象（相）走“田”对应的塞象眼检查点Y轴偏移
 
 
+// PGN字符横坐标转数值
 int pgnchar2int(char c) {
     return (int)c - (int)'a';
 }
 
+// 数值转PGN字符横坐标
 char pgnint2char(int i) {
     return (char)((int)'a' + i);
 }
 
+// 字符数字转整型数值
 int char2int(char c) {
     return (int)c - (int)'0';
 }
 
+// 整型数值转字符数字
 char int2char(int i) {
     return (char)((int)'0' + i);
 }
@@ -76,7 +80,7 @@ struct Move {
         return source_x == other.source_x && source_y == other.source_y && target_x == other.target_x
                && target_y == other.target_y;
     }
-};
+}; // 描述一步行棋（起点和终点坐标）的数据结构
 
 struct Grid {
     stoneType type;
@@ -94,7 +98,7 @@ struct Grid {
     bool operator == (const Grid& other) const {
         return type == other.type && color == other.color;
     }
-};
+}; // 描述棋盘上单个格子（当前包含的棋子类型和颜色）的数据结构
 
 class Chess {
 private:
@@ -104,41 +108,41 @@ private:
     vector<int> continuePeaceTurn;
     vector<int> lastMoveEaten;
 public:
-    Chess();
-    void resetBoard();
-    void generateMoves(vector<Move> &legalMoves, bool mustDefend=true);
-    void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true);
-    bool repeatAfterMove(const Move& move);
-    static bool inBoard(int mx, int my);
-    static bool inKingArea(int mx, int my, colorType mcolor);
-    static bool inColorArea(int mx, int my, colorType mcolor);
-    colorType oppColor();
-    colorType oppColor(colorType mcolor);
-    bool isMoveValid(const Move& move, bool mustDefend=true);
-    bool isLegalMove(const Move& move, bool mustDefend=true);
-    bool isLegalMoveWithForbidden(const Move& move, bool mustDefend=true);
-    bool isMoveValidWithForbidden(const Move& move, bool mustDefend=true);
-    bool makeMoveAssumeLegal(const Move& move);
-    bool attacked(colorType color, int mx, int my);
-    bool betweenIsEmpty(int sx, int sy, int ex, int ey);
-    int betweenNotEmptyNum(int sx, int sy, int ex, int ey);
-    static bool inSameLine(int sx, int sy, int ex, int ey);
-    static bool inSameStraightLine(int sx, int sy, int ex, int ey);
-    static bool inSameObiqueLine(int sx, int sy, int ex, int ey);
-    bool isMyKingAttackedAfterMove(const Move& move);
-    bool isOppKingAttackedAfterMove(const Move& move);
-    bool currKingAttacked(const Move& move);
-    bool winAfterMove(const Move& move);
-    void undoMove();
-    bool exceedMaxPeaceState();
-    static int xy2pos(int mx, int my);
-    static int pos2x(int mpos);
-    static int pos2y(int mpos);
-    void printBoard();
+    Chess(); // 构造函数，初始化棋盘
+    void resetBoard(); // 重置棋盘为初始状态
+    void generateMoves(vector<Move> &legalMoves, bool mustDefend=true); // 生成常规合法移动步
+    void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true); // 生成包含禁手规则的合法移动步
+    bool repeatAfterMove(const Move& move); // 判断移动后是否出现长将/长捉等重复局面
+    static bool inBoard(int mx, int my); // 判断坐标是否在棋盘内
+    static bool inKingArea(int mx, int my, colorType mcolor); // 判断是否在九宫格内
+    static bool inColorArea(int mx, int my, colorType mcolor); // 判断是否在己方半场
+    colorType oppColor(); // 获取对手颜色
+    colorType oppColor(colorType mcolor); // 获取指定颜色的对手颜色
+    bool isMoveValid(const Move& move, bool mustDefend=true); // 验证移动是否有效
+    bool isLegalMove(const Move& move, bool mustDefend=true); // 判断是否为合法移动
+    bool isLegalMoveWithForbidden(const Move& move, bool mustDefend=true); // 判断包含禁手规则下是否合法
+    bool isMoveValidWithForbidden(const Move& move, bool mustDefend=true); // 验证包含禁手规则下的移动
+    bool makeMoveAssumeLegal(const Move& move); // 假设合法并执行移动，更新状态
+    bool attacked(colorType color, int mx, int my); // 检查指定位置是否被某方颜色攻击
+    bool betweenIsEmpty(int sx, int sy, int ex, int ey); // 判断两点之间是否没有棋子
+    int betweenNotEmptyNum(int sx, int sy, int ex, int ey); // 计算两点之间非空棋子的数量
+    static bool inSameLine(int sx, int sy, int ex, int ey); // 判断两点是否在同一直线或对角线
+    static bool inSameStraightLine(int sx, int sy, int ex, int ey); // 判断两点是否在同行或同列
+    static bool inSameObiqueLine(int sx, int sy, int ex, int ey); // 判断两点是否在同斜线
+    bool isMyKingAttackedAfterMove(const Move& move); // 判断移动后己方主帅是否被将军
+    bool isOppKingAttackedAfterMove(const Move& move); // 判断移动后是否将对手的军
+    bool currKingAttacked(const Move& move); // 判断当前主帅是否正在被攻击
+    bool winAfterMove(const Move& move); // 判断该移动是否能直接获胜
+    void undoMove(); // 撤销上一步移动
+    bool exceedMaxPeaceState(); // 判断是否超过最大求和/平局步数
+    static int xy2pos(int mx, int my); // 二维坐标转一维索引
+    static int pos2x(int mpos); // 一维索引转X坐标
+    static int pos2y(int mpos); // 一维索引转Y坐标
+    void printBoard(); // 打印当前棋盘
 };
 
-void getInputBotzone(Chess& chess);
-void giveOutputBotzone(Chess& chess);
+void getInputBotzone(Chess& chess); // 处理Botzone平台输入
+void giveOutputBotzone(Chess& chess); // 向Botzone平台输出落子
 
 int main() {
     Chess chess;
@@ -148,6 +152,7 @@ int main() {
 }
 
 
+// 向Botzone平台输出落子的函数定义
 void giveOutputBotzone(Chess& chess) {
     vector<Move> retMoves;
     chess.generateMovesWithForbidden(retMoves);
@@ -168,6 +173,7 @@ void giveOutputBotzone(Chess& chess) {
     cout << writer.write(ret) << endl;
 }
 
+// 解析Botzone平台输入以更新棋局状态的函数定义
 void getInputBotzone(Chess& chess) {
     string str;
     getline(cin, str);
@@ -213,6 +219,7 @@ void getInputBotzone(Chess& chess) {
 
 }
 
+// 重置棋盘状态为初始状态的函数定义
 void Chess::resetBoard() {
     vector<Grid> currState;
     Grid boardInfo[BOARDWIDTH][BOARDHEIGHT];
@@ -263,6 +270,7 @@ void Chess::resetBoard() {
     state.push_back(currState);
 }
 
+// Chess类构造函数的定义
 Chess::Chess() {
     resetBoard();
     continuePeaceTurn.clear();
@@ -273,6 +281,7 @@ Chess::Chess() {
     currTurnId = 0;
 }
 
+// 生成当前所有伪合法或合法步的函数定义
 void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
     legalMoves.clear();
     for (int x = 0; x < BOARDWIDTH; x++) {
@@ -487,14 +496,17 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
     }
 }
 
+// 判断给定坐标是否位于棋盘内的函数定义
 bool Chess::inBoard(int mx, int my) {
     return mx >= 0 && mx < BOARDWIDTH && my >= 0 && my < BOARDHEIGHT;
 }
 
+// 返回当前行动方对手颜色的函数定义
 colorType Chess::oppColor() {
     return currColor == BLACK ? RED : BLACK;
 }
 
+// 判断给定移动是否为合法步的函数定义
 bool Chess::isLegalMove(const Move &move, bool mustDefend) {
     vector<Move> currLegalMoves;
     generateMoves(currLegalMoves, mustDefend);
@@ -502,6 +514,7 @@ bool Chess::isLegalMove(const Move &move, bool mustDefend) {
     return fi_iter != currLegalMoves.end();
 }
 
+// 在假设移动合法的前提下执行该移动，更新棋盘状态的函数定义
 bool Chess::makeMoveAssumeLegal(const Move &move) {
     int nextPeaceTrun =  continuePeaceTurn[currTurnId] + 1;
     vector<Grid> copyState = state[currTurnId];
@@ -528,6 +541,7 @@ bool Chess::makeMoveAssumeLegal(const Move &move) {
     return true;
 }
 
+// 判断指定位置是否受特定颜色棋子攻击的函数定义
 bool Chess::attacked(colorType color, int mx, int my) {
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
@@ -610,6 +624,7 @@ bool Chess::attacked(colorType color, int mx, int my) {
     return false;
 }
 
+// 判断两坐标点之间是否无任何棋子的函数定义
 bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey) {
     assert(inSameStraightLine(sx, sy, ex, ey));
     int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
@@ -624,21 +639,25 @@ bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey) {
     return true;
 }
 
+// 判断两坐标点是否处于同一横线、竖线或对角线的函数定义
 bool Chess::inSameLine(int sx, int sy, int ex, int ey) {
     int dex = ex - sx, dey = ey - sy;
     return dex == dey || dex == -dey || dex == 0 || dey == 0;
 }
 
+// 判断两坐标点是否处于同一横线或竖线的函数定义
 bool Chess::inSameStraightLine(int sx, int sy, int ex, int ey) {
     int dex = ex - sx, dey = ey - sy;
     return dex == 0 || dey == 0;
 }
 
+// 判断两坐标点是否处于同一对角线的函数定义
 bool Chess::inSameObiqueLine(int sx, int sy, int ex, int ey) {
     int dex = ex - sx, dey = ey - sy;
     return dex == dey || dex == -dey;
 }
 
+// 判断执行某步移动后，己方主帅是否处于被攻击状态的函数定义
 bool Chess::isMyKingAttackedAfterMove(const Move &move) {
     colorType originColor = currColor;
     makeMoveAssumeLegal(move);
@@ -658,10 +677,12 @@ bool Chess::isMyKingAttackedAfterMove(const Move &move) {
     return myKingStillAttacked;
 }
 
+// 综合验证移动是否有效的函数定义
 bool Chess::isMoveValid(const Move& move, bool mustDefend) {
     return isLegalMove(move, mustDefend);
 }
 
+// 评估某步移动之后是否能造成对方无路可走(获胜)的函数定义
 bool Chess::winAfterMove(const Move &move) {
     makeMoveAssumeLegal(move);
     vector<Move> oppLegalMoves;
@@ -670,6 +691,7 @@ bool Chess::winAfterMove(const Move &move) {
     return oppLegalMoves.empty();
 }
 
+// 判断当前行动方主帅是否正处于被攻击状态的函数定义
 bool Chess::currKingAttacked(const Move &move) {
     int kingX = -1, kingY = -1;
     for (int x = 0; x < BOARDWIDTH; x++) {
@@ -683,6 +705,7 @@ bool Chess::currKingAttacked(const Move &move) {
     return attacked(oppColor(), kingX, kingY);
 }
 
+// 评估执行某步移动后是否对敌方主帅造成攻击(将军)的函数定义
 bool Chess::isOppKingAttackedAfterMove(const Move &move) {
     colorType originColor = currColor;
     makeMoveAssumeLegal(move);
@@ -702,22 +725,27 @@ bool Chess::isOppKingAttackedAfterMove(const Move &move) {
     return oppKingBeingAttacked;
 }
 
+// 判断对局是否达到自然限着回合数导致平局的函数定义
 bool Chess::exceedMaxPeaceState() {
     return continuePeaceTurn[currTurnId] >= 60 - 1;
 }
 
+// 将二维坐标映射到一维数组索引的函数定义
 int Chess::xy2pos(int mx, int my) {
     return my * BOARDWIDTH + mx;
 }
 
+// 将一维数组索引解码为X轴坐标的函数定义
 int Chess::pos2x(int mpos) {
     return mpos % BOARDWIDTH;
 }
 
+// 将一维数组索引解码为Y轴坐标的函数定义
 int Chess::pos2y(int mpos) {
     return mpos / BOARDWIDTH;
 }
 
+// 判断给定坐标是否位于指定方九宫格内的函数定义
 bool Chess::inKingArea(int mx, int my, colorType mcolor) {
     assert(mcolor == RED || mcolor == BLACK);
     if (mcolor == RED) {
@@ -727,6 +755,7 @@ bool Chess::inKingArea(int mx, int my, colorType mcolor) {
     }
 }
 
+// 判断给定坐标是否位于指定方半场内的函数定义
 bool Chess::inColorArea(int mx, int my, colorType mcolor) {
     assert(mcolor == RED || mcolor == BLACK);
     if (mcolor == RED) {
@@ -736,6 +765,7 @@ bool Chess::inColorArea(int mx, int my, colorType mcolor) {
     }
 }
 
+// 统计同行或同列两坐标点之间障碍棋子数量的函数定义
 int Chess::betweenNotEmptyNum(int sx, int sy, int ex, int ey) {
     assert(inSameStraightLine(sx, sy, ex, ey));
     int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
@@ -752,10 +782,12 @@ int Chess::betweenNotEmptyNum(int sx, int sy, int ex, int ey) {
     return retNum;
 }
 
+// 返回给定颜色相对对手颜色的函数定义
 colorType Chess::oppColor(colorType mcolor) {
     return mcolor == RED ? BLACK : RED;
 }
 
+// 撤销落子并恢复系统至上一步状态的函数定义
 void Chess::undoMove() {
     if (currTurnId == 0) {
         return;
@@ -767,6 +799,7 @@ void Chess::undoMove() {
     lastMoveEaten.pop_back();
 }
 
+// 生成满足禁手规则的合法移动步集合的函数定义
 void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend) {
     vector<Move> firstMoves;
     generateMoves(firstMoves, mustDefend);
@@ -778,6 +811,7 @@ void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend
     }
 }
 
+// 评估某步移动后是否会导致达到三次重复局面的函数定义
 bool Chess::repeatAfterMove(const Move& move) {
     makeMoveAssumeLegal(move);
     int tmp_id = currTurnId;
@@ -804,6 +838,7 @@ bool Chess::repeatAfterMove(const Move& move) {
     return repeatTime >= 3;
 }
 
+// 综合判断给定移动是否遵守禁手规则而合法的函数定义
 bool Chess::isLegalMoveWithForbidden(const Move& move, bool mustDefend) {
     vector<Move> currLegalMoves;
     generateMovesWithForbidden(currLegalMoves, mustDefend);
@@ -811,6 +846,7 @@ bool Chess::isLegalMoveWithForbidden(const Move& move, bool mustDefend) {
     return fi_iter != currLegalMoves.end();
 }
 
+// 将当前棋盘通过控制台可视化的函数定义
 void Chess::printBoard() {
     std::cout << std::endl << "Board" << std::endl;
     for (int y = 9; y >= 0; y--) {
@@ -821,6 +857,7 @@ void Chess::printBoard() {
     }
 }
 
+// 验证在禁手规则限制下某移动是否有效的函数定义
 bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
     return isLegalMoveWithForbidden(move, mustDefend);
 }
