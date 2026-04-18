@@ -82,6 +82,17 @@ struct Move {
     }
 }; // 描述一步行棋（起点和终点坐标）的数据结构
 
+//MoveNode，根据当前的着棋算出相应的收益，同时可增添其它的数据属性 博弈树上的局面应当是局面节点构成的树，根据局面做估值
+//数学理论上，是根据状态构建博弈树，实际上使用着法节点构成博弈树
+struct MoveNode
+{
+    Move* strategy;
+    int value;
+    bool operator ==(const MoveNode& other){
+        return *(this->strategy) == *(other.strategy);
+    }
+};
+
 struct Grid {
     stoneType type;
     colorType color;
@@ -107,7 +118,7 @@ private:
     int currTurnId;
     colorType currColor;
     vector<int> continuePeaceTurn;
-    vector<int> lastMoveEaten;
+    vector<int> lastMoveEaten;  //历史每一步是否发生了吃子 0或1 
 public:
     Chess(); // 构造函数，初始化棋盘
     void resetBoard(); // 重置棋盘为初始状态
@@ -148,12 +159,16 @@ public:
 };
 
 //产生策略类
+
+//ChessAI的构造函数？
 class ChessAI{
 public:
     //ChessAI属性
     Chess* board;                      //储存现有 棋局状态类(着法生成和状态显示类)
+
+    bool isKingattacked;               //己方将/帅是否被 将军
     vector<Grid> curstones;            //储存现有 各个棋子状态
-    vector<bool> curattacked;           //我方的棋子是否被吃
+    vector<bool> curattacked;          //我方的棋子是否被吃
     vector<Move> curlegalmoves;        //由chess产生，当前合法的状态
     vector<Move> eatenmoves;           //"死手"——产生吃子的着棋
     vector<Move> plainmoves;           //"白手"——不产生吃子的着棋
@@ -161,7 +176,12 @@ public:
     //ChessAI方法
     void getcurstones(void);
     bool isattacked(colorType color,int mx,int my); //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
-    void generateMovesWithForbidden();          //对应board的同名方法
+    void generateMovesWithForbidden();              //对应board的同名方法
+    void getdiffmoves();                            //得到吃子 / 非吃子 着棋
+    int calueatenmove();                              
+
+    ChessAI();
+    ~ChessAI();
 
 };
 void getInputBotzone(Chess& chess); // 处理Botzone平台输入
@@ -853,7 +873,7 @@ bool Chess::repeatAfterMove(const Move& move) {
         tmp_id -= 2;
     }
     int repeatTime = 0;
-    for (int id = currTurnId; id >= tmp_id; id -= 2) {
+    for (int id = currTurnId; id >= tmp_id; id -= 2) {  //从后往前，而非从前往后，跳跃比对
         if (state[id] == state[currTurnId]) {
             repeatTime++;
         }
@@ -1002,9 +1022,39 @@ bool ChessAI::isattacked(colorType color,int mx,int my){
     }
 }
 
+void ChessAI::generateMovesWithForbidden(){
+    board->generateMovesWithForbidden(this->curlegalmoves,this->isKingattacked);
+    //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
+
+}
+
+
+void ChessAI::getdiffmoves(){
+    for(auto& s : this->curlegalmoves){
+        if(board->state[board->currTurnId][board->xy2pos(s.target_x,s.target_y)].color == board->oppColor()){
+            this->eatenmoves.push_back(s);
+        }else{
+            this->plainmoves.push_back(s);
+        }
+    }
+}
+
+ChessAI::ChessAI(){
+    this->board = new Chess();
+
+    //初始化其它成员变量
+    isKingattacked = false;
+}
+
+ChessAI::~ChessAI(){
+    //有指针变量，必须指定析构函数
+    if(board != nullptr){
+        delete board;
+        board = nullptr;
+    }
+}
+
 
 //判断此次下子是否吃子
-
 //吃子的估值
-
 //非吃子的估值
