@@ -1,4 +1,4 @@
-//¸ÃbotÎªbotzoneÊ¾Àýbot£¬Ëæ»úÏÂÆå£¬±£Ö¤ºÏ·¨£¬Î´Ê¹ÓÃÈÎºÎÆÀ¹ÀËã·¨
+//ï¿½ï¿½botÎªbotzoneÊ¾ï¿½ï¿½botï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½å£¬ï¿½ï¿½Ö¤ï¿½Ï·ï¿½ï¿½ï¿½Î´Ê¹ï¿½ï¿½ï¿½Îºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ã·¨
 
 #include <iostream>
 #include <string>
@@ -8,7 +8,7 @@
 #include <cassert>
 #include <algorithm>
 #include "jsoncpp/json.h"
-
+#include <time.h>
 using std::string;
 using std::vector;
 using std::map;
@@ -16,21 +16,21 @@ using std::cin;
 using std::cout;
 using std::endl;
 
-// 9Â· 10µÀ
+// 9Â· 10ï¿½ï¿½
 #define BOARDWIDTH 9
 #define BOARDHEIGHT 10
 
-// Æå×ÓÀàÐÍ
-// None=¿Õ, King=½«/Ë§, Bishop=Ïó/Ïà, Knight=Âí, Rook=³µ, Pawn=±ø/×ä, Cannon=ÅÚ, Assistant=Ê¿/ÊË
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+// None=ï¿½ï¿½, King=ï¿½ï¿½/Ë§, Bishop=ï¿½ï¿½/ï¿½ï¿½, Knight=ï¿½ï¿½, Rook=ï¿½ï¿½, Pawn=ï¿½ï¿½/ï¿½ï¿½, Cannon=ï¿½ï¿½, Assistant=Ê¿/ï¿½ï¿½
 enum stoneType {None = 0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7};
 
-// Ã¶¾Ù£ºÆå×ÓÑÕÉ«£¨BLACK=ºÚ·½, RED=ºì·½, EMPTY=¿ÕÎ»ÖÃ£©
+// Ã¶ï¿½Ù£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É«ï¿½ï¿½BLACK=ï¿½Ú·ï¿½, RED=ï¿½ì·½, EMPTY=ï¿½ï¿½Î»ï¿½Ã£ï¿½
 enum colorType {BLACK=0, RED=1, EMPTY = 2};
 
-// ¾Å¹¬¸ñµÄµ×ÏßY×ø±ê£¨ºÚ·½µ×ÏßÎª9£¬ºì·½µ×ÏßÎª0£©
+// ï¿½Å¹ï¿½ï¿½ï¿½Äµï¿½ï¿½ï¿½Yï¿½ï¿½ï¿½ê£¨ï¿½Ú·ï¿½ï¿½ï¿½ï¿½ï¿½Îª9ï¿½ï¿½ï¿½ì·½ï¿½ï¿½ï¿½ï¿½Îª0ï¿½ï¿½
 int baseLine[2] = {9, 0};
 
-// Æå×Ó¶ÔÓ¦µÄ×Ö·û±íÊ¾£¨ÓÃÓÚ´òÓ¡»òµ÷ÊÔ£©
+// ï¿½ï¿½ï¿½Ó¶ï¿½Ó¦ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½Ó¡ï¿½ï¿½ï¿½ï¿½Ô£ï¿½
 char stoneSym[] = "*kbnrpca";
 map<char,stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King},
                                {stoneSym[2], Bishop}, {stoneSym[3], Knight},
@@ -38,70 +38,70 @@ map<char,stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King},
                                {stoneSym[6], Cannon}, {stoneSym[7], Assistant}};
 
 // ==========================================
-// Æå×ÓÒÆ¶¯·½Ïò³£Á¿Êý×é
+// ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 // ==========================================
-// Ã××ÖÐÍ·½Ïò£¨ÖÜÎ§8¸öµã£©
+// ï¿½ï¿½ï¿½ï¿½ï¿½Í·ï¿½ï¿½ï¿½ï¿½ï¿½Î§8ï¿½ï¿½ï¿½ã£©
 int dx[] = {-1,-1,-1,0,0,1,1,1};
 int dy[] = {-1,0,1,-1,1,-1,0,1};
-// Ê¿/ÊËµÄÒÆ¶¯·½Ïò£¨Ð±Ïò4¸öµã£©
+// Ê¿/ï¿½Ëµï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½Ð±ï¿½ï¿½4ï¿½ï¿½ï¿½ã£©
 int dx_ob[] = {-1,1,-1,1};
 int dy_ob[] = {-1,-1,1,1};
-// ³µ/ÅÚ/½«µÄÖ±ÏßÒÆ¶¯·½Ïò£¨ÉÏÏÂ×óÓÒ£©
+// ï¿½ï¿½/ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½Ö±ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò£ï¿½
 int dx_strai[] = {-1,0,0,1};
 int dy_strai[] = {0,-1,1,0};
-// ±ø/×ä¹ýºÓºóµÄ×óÓÒÒÆ¶¯
+// ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½Óºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½
 int dx_lr[] = {-1,1};
 
-// ÂíµÄÒÆ¶¯·½Ïò£¨×ßÈÕ×Ö£¬¹²8¸öÂäµã£©
+// ï¿½ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½8ï¿½ï¿½ï¿½ï¿½ã£©
 int dx_knight[] = {-2,-2,-1,-1,1,1,2,2};
 int dy_knight[] = {-1,1,-2,2,-2,2,-1,1};
-// ÂíÍÈµÄ×ø±êÔöÁ¿£¨ÓÃÓÚ¼ì²â¡°õ¿ÂíÍÈ¡±£©
+// ï¿½ï¿½ï¿½Èµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú¼ï¿½â¡°ï¿½ï¿½ï¿½ï¿½ï¿½È¡ï¿½ï¿½ï¿½
 int dx_knight_foot[] = {-1,-1,0,0,0,0,1,1};
 int dy_knight_foot[] = {0,0,-1,1,-1,1,0,0};
 
-// Ïó/ÏàµÄÒÆ¶¯·½Ïò£¨×ßÌï×Ö£¬¹²4¸öÂäµã£©
+// ï¿½ï¿½/ï¿½ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö£ï¿½ï¿½ï¿½4ï¿½ï¿½ï¿½ï¿½ã£©
 int dx_bishop[] = {-2,-2,2,2};
 int dy_bishop[] = {-2,2,-2,2};
-// ÏóÑÛµÄ×ø±êÔöÁ¿£¨ÓÃÓÚ¼ì²â¡°ÈûÏóÑÛ¡±£©
+// ï¿½ï¿½ï¿½Ûµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú¼ï¿½â¡°ï¿½ï¿½ï¿½ï¿½ï¿½Û¡ï¿½ï¿½ï¿½
 int dx_bishop_eye[] = {-1,-1,1,1};
 int dy_bishop_eye[] = {-1,1,-1,1};
 
 // ==========================================
-// ×ø±êÏµ×ª»»¹¤¾ßº¯Êý
+// ï¿½ï¿½ï¿½ï¿½Ïµ×ªï¿½ï¿½ï¿½ï¿½ï¿½ßºï¿½ï¿½ï¿½
 // ==========================================
-// ½« PGN ×ÖÄ¸(a-i)×ªÎª 0-8 ÕûÊý
+// ï¿½ï¿½ PGN ï¿½ï¿½Ä¸(a-i)×ªÎª 0-8 ï¿½ï¿½ï¿½ï¿½
 int pgnchar2int(char c) { return (int)c - (int)'a'; }
-// ½« 0-8 ÕûÊý×ªÎª PGN ×ÖÄ¸(a-i)
+// ï¿½ï¿½ 0-8 ï¿½ï¿½ï¿½ï¿½×ªÎª PGN ï¿½ï¿½Ä¸(a-i)
 char pgnint2char(int i) { return (char)((int)'a' + i); }
-// ½«×Ö·ûÊý×Ö('0'-'9')×ªÎªÕûÊý 0-9
+// ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½('0'-'9')×ªÎªï¿½ï¿½ï¿½ï¿½ 0-9
 int char2int(char c) { return (int)c - (int)'0'; }
-// ½«ÕûÊý 0-9 ×ªÎª×Ö·ûÊý×Ö
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ 0-9 ×ªÎªï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½
 char int2char(int i) { return (char)((int)'0' + i); }
 
-// ½á¹¹Ìå£º±íÊ¾Ò»²½Æå
+// ï¿½á¹¹ï¿½å£ºï¿½ï¿½Ê¾Ò»ï¿½ï¿½ï¿½ï¿½
 struct Move {
-    int source_x, source_y, target_x, target_y; // Æðµã×ø±êÓëÖÕµã×ø±ê
+    int source_x, source_y, target_x, target_y; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½
     Move() {source_x = -1; source_y = -1; target_x = -1; target_y = -1;}
     Move(int msx, int msy, int mtx, int mty): source_x(msx), source_y(msy),
                                                                 target_x(mtx), target_y(mty) {;}
-    // ´ÓÆ½Ì¨·µ»ØµÄ×Ö·û´®ÐÎÊ½(Èç"a0", "a1")¹¹Ôì
+    // ï¿½ï¿½Æ½Ì¨ï¿½ï¿½ï¿½Øµï¿½ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½Ê½(ï¿½ï¿½"a0", "a1")ï¿½ï¿½ï¿½ï¿½
     Move(string msource, string mtarget) {
         source_x = pgnchar2int(msource[0]);
         source_y = char2int(msource[1]);
         target_x = pgnchar2int(mtarget[0]);
         target_y = char2int(mtarget[1]);
     }
-    // ÅÐ¶ÏÁ½²½ÆåÊÇ·ñÍêÈ«ÏàÍ¬
+    // ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½È«ï¿½ï¿½Í¬
     bool operator ==(const Move& other) const {
         return source_x == other.source_x && source_y == other.source_y && target_x == other.target_x
                && target_y == other.target_y;
     }
 };
 
-// ½á¹¹Ìå£º±íÊ¾ÆåÅÌÉÏµÄÒ»¸ö¸ñ×Ó
+// ï¿½á¹¹ï¿½å£ºï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 struct Grid {
-    stoneType type;  // Æå×ÓÀàÐÍ
-    colorType color; // Æå×ÓÑÕÉ«£¨ÊôÓÚÄÄÒ»·½£¬»òÕßÎª¿Õ£©
+    stoneType type;  // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    colorType color; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É«ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îªï¿½Õ£ï¿½
     Grid () : type(None), color(EMPTY) {;}
     Grid (stoneType mtype, colorType mcolor):
             type(mtype), color(mcolor) {;}
@@ -117,29 +117,29 @@ struct Grid {
     }
 };
 
-// ºËÐÄÀà£ºÖÐ¹úÏóÆå¹æÔòÓë×´Ì¬ÒýÇæ
+// ï¿½ï¿½ï¿½ï¿½ï¿½à£ºï¿½Ð¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½
 class Chess {
 private:
-    // ×´Ì¬ÁÐ±í£ºÊ¹ÓÃÈýÎ¬Êý×é±£´æÀúÊ·ÉÏÃ¿Ò»²½ÍêÕûµÄÆåÅÌ×´Ì¬£¬·½±ã»ÚÆåºÍÅÐ¶ÏÖØ¸´¾ÖÃæ
+    // ×´Ì¬ï¿½Ð±ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½ï¿½ï¿½Î¬ï¿½ï¿½ï¿½é±£ï¿½ï¿½ï¿½ï¿½Ê·ï¿½ï¿½Ã¿Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½ï¿½
     std::vector<std::vector<Grid>> state;
-    int currTurnId;                  // µ±Ç°»ØºÏÊý
-    colorType currColor;             // µ±Ç°ÂÖµ½ÄÄÒ»·½×ßÆå
-    vector<int> continuePeaceTurn;   // Á¬ÐøÎ´³Ô×ÓµÄ»ØºÏÊý£¨ÓÃÓÚÊµÏÖ×ÔÈ»ÏÞ×Å60²½ÅÐºÍ£©
-    vector<int> lastMoveEaten;       // ¼ÇÂ¼ÀúÊ·Ã¿Ò»²½ÊÇ·ñ·¢ÉúÁË³Ô×Ó
+    int currTurnId;                  // ï¿½ï¿½Ç°ï¿½Øºï¿½ï¿½ï¿½
+    colorType currColor;             // ï¿½ï¿½Ç°ï¿½Öµï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+    vector<int> continuePeaceTurn;   // ï¿½ï¿½ï¿½ï¿½Î´ï¿½ï¿½ï¿½ÓµÄ»Øºï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Êµï¿½ï¿½ï¿½ï¿½È»ï¿½ï¿½ï¿½ï¿½60ï¿½ï¿½ï¿½ÐºÍ£ï¿½
+    vector<int> lastMoveEaten;       // ï¿½ï¿½Â¼ï¿½ï¿½Ê·Ã¿Ò»ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½Ë³ï¿½ï¿½ï¿½
 
 public:
     Chess();
     void resetBoard();
     
-    // Éú³ÉËùÓÐÎ±ºÏ·¨²½£¨mustDefendÎªtrueÊ±»áÌÞ³ýËÍ½«µÄ²½£©
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î±ï¿½Ï·ï¿½ï¿½ï¿½ï¿½ï¿½mustDefendÎªtrueÊ±ï¿½ï¿½ï¿½Þ³ï¿½ï¿½Í½ï¿½ï¿½Ä²ï¿½ï¿½ï¿½
     void generateMoves(vector<Move> &legalMoves, bool mustDefend=true);
-    // Éú³ÉºÏ·¨²½£¬ÇÒ¹ýÂËµô»áµ¼ÖÂÈý´ÎÖØ¸´¾ÖÃæµÄÎ¥¹æ²½
+    // ï¿½ï¿½ï¿½ÉºÏ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò¹ï¿½ï¿½Ëµï¿½ï¿½áµ¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î¥ï¿½æ²½
     void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true);
-    bool repeatAfterMove(const Move& move); // ¼ì²â×ßÕâ²½ºóÊÇ·ñ»áÔì³É³¤½«/³¤×½µÈÖØ¸´¾ÖÃæ
+    bool repeatAfterMove(const Move& move); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â²½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½É³ï¿½ï¿½ï¿½/ï¿½ï¿½×½ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½ï¿½
     
     static bool inBoard(int mx, int my);
-    static bool inKingArea(int mx, int my, colorType mcolor); // ÊÇ·ñÔÚ¾Å¹¬¸ñÄÚ
-    static bool inColorArea(int mx, int my, colorType mcolor); // ÊÇ·ñÎ´¹ýºÓ
+    static bool inKingArea(int mx, int my, colorType mcolor); // ï¿½Ç·ï¿½ï¿½Ú¾Å¹ï¿½ï¿½ï¿½ï¿½ï¿½
+    static bool inColorArea(int mx, int my, colorType mcolor); // ï¿½Ç·ï¿½Î´ï¿½ï¿½ï¿½ï¿½
     
     colorType oppColor();
     colorType oppColor(colorType mcolor);
@@ -149,43 +149,43 @@ public:
     bool isLegalMoveWithForbidden(const Move& move, bool mustDefend=true);
     bool isMoveValidWithForbidden(const Move& move, bool mustDefend=true);
     
-    // ÔÚÆåÅÌÉÏÖ´ÐÐÒ»²½Æå£¬²¢¼ÇÂ¼ÀúÊ·×´Ì¬
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö´ï¿½ï¿½Ò»ï¿½ï¿½ï¿½å£¬ï¿½ï¿½ï¿½ï¿½Â¼ï¿½ï¿½Ê·×´Ì¬
     bool makeMoveAssumeLegal(const Move& move);
-    // »ÚÆå£¬³·ÏúÉÏÒ»²½²Ù×÷
+    // ï¿½ï¿½ï¿½å£¬ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     void undoMove();
     
-    // ÅÐ¶Ï¸ø¶¨×ø±êµÄ¸ñ×ÓÊÇ·ñÕýÔÚ±»Ö¸¶¨·½¹¥»÷
+    // ï¿½Ð¶Ï¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¸ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½ï¿½Ú±ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     bool attacked(colorType color, int mx, int my);
     
-    // Â·¾¶¼ì²éÏà¹Ø
+    // Â·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     bool betweenIsEmpty(int sx, int sy, int ex, int ey);
     int betweenNotEmptyNum(int sx, int sy, int ex, int ey);
     static bool inSameLine(int sx, int sy, int ex, int ey);
     static bool inSameStraightLine(int sx, int sy, int ex, int ey);
     static bool inSameObiqueLine(int sx, int sy, int ex, int ey);
     
-    // ½«¾üÅÐ¶ÏÏà¹Ø
-    bool isMyKingAttackedAfterMove(const Move& move);  // ×ßÍêÕâ²½ºó¼º·½ÀÏ½«ÊÇ·ñ±»½«¾ü£¨·ÀËÍ½«£©
-    bool isOppKingAttackedAfterMove(const Move& move); // ×ßÍêÕâ²½ºó¶Ô·½ÀÏ½«ÊÇ·ñ±»½«¾ü
+    // ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½
+    bool isMyKingAttackedAfterMove(const Move& move);  // ï¿½ï¿½ï¿½ï¿½ï¿½â²½ï¿½ó¼º·ï¿½ï¿½Ï½ï¿½ï¿½Ç·ñ±»½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í½ï¿½ï¿½ï¿½
+    bool isOppKingAttackedAfterMove(const Move& move); // ï¿½ï¿½ï¿½ï¿½ï¿½â²½ï¿½ï¿½Ô·ï¿½ï¿½Ï½ï¿½ï¿½Ç·ñ±»½ï¿½ï¿½ï¿½
     bool currKingAttacked(const Move& move);
-    bool winAfterMove(const Move& move); // ÅÐ¶ÏÊÇ·ñ¾øÉ±
+    bool winAfterMove(const Move& move); // ï¿½Ð¶ï¿½ï¿½Ç·ï¿½ï¿½É±
     
-    bool exceedMaxPeaceState(); // ÊÇ·ñ´ïµ½Á¬Ðø²»³Ô×ÓÅÐºÍÌõ¼þ
+    bool exceedMaxPeaceState(); // ï¿½Ç·ï¿½ïµ½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ðºï¿½ï¿½ï¿½ï¿½ï¿½
     
-    // 1D×ø±êÓë2D×ø±ê»¥Ïà×ª»»
+    // 1Dï¿½ï¿½ï¿½ï¿½ï¿½ï¿½2Dï¿½ï¿½ï¿½ê»¥ï¿½ï¿½×ªï¿½ï¿½
     static int xy2pos(int mx, int my);
     static int pos2x(int mpos);
     static int pos2y(int mpos);
     
 
 
-    //Ô­»ñÈ¡ÐÅÏ¢½Ó¿ÚÊÇprivateµÄ£¬ÐèÒª»ñÈ¡ÐÅÏ¢Ìí¼ÓpublicµÄ½Ó¿Ú
+    //Ô­ï¿½ï¿½È¡ï¿½ï¿½Ï¢ï¿½Ó¿ï¿½ï¿½ï¿½privateï¿½Ä£ï¿½ï¿½ï¿½Òªï¿½ï¿½È¡ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½publicï¿½Ä½Ó¿ï¿½
     void printBoard();
-    // »ñÈ¡µ±Ç°ÆåÅÌÉÏÖ¸¶¨×ø±ê¸ñÐÅÏ¢
+    // ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï¢
     Grid getGrid(int x, int y) const {
         return state[currTurnId][xy2pos(x, y)];
     }
-    // »ñÈ¡µ±Ç°×ßÆå·½ÑÕÉ«
+    // ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ï¿½å·½ï¿½ï¿½É«
     colorType getCurrColor() const {
         return currColor;
     }
@@ -199,60 +199,60 @@ void giveOutputBotzone(Chess& chess);
 
 int main() {
     Chess chess;
-    getInputBotzone(chess);  // »ñÈ¡Æ½Ì¨ÊäÈë²¢»Ö¸´¾ÖÃæ
-    giveOutputBotzone(chess); // Éú³ÉAI¾ö²ß²¢Êä³ö
+    getInputBotzone(chess);  // ï¿½ï¿½È¡Æ½Ì¨ï¿½ï¿½ï¿½ë²¢ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½
+    giveOutputBotzone(chess); // ï¿½ï¿½ï¿½ï¿½AIï¿½ï¿½ï¿½ß²ï¿½ï¿½ï¿½ï¿½
     return 0;
 }
 
-// Êä³ö AI µÄ¾ö²ß¸øÆ½Ì¨
+// ï¿½ï¿½ï¿½ AI ï¿½Ä¾ï¿½ï¿½ß¸ï¿½Æ½Ì¨
 void giveOutputBotzone(Chess& chess) {
     vector<Move> retMoves;
-    // »ñÈ¡µ±Ç°¾ÖÃæËùÓÐºÏ·¨µÄ×ß²½
+    // ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÐºÏ·ï¿½ï¿½ï¿½ï¿½ß²ï¿½
     chess.generateMovesWithForbidden(retMoves);
     Json::Value ret;
 
     if (retMoves.empty()) {
-        // ÎÞÂ·¿É×ß£¨±»½«ËÀ»òÀ§±Ð£©£¬ÈÏÊäÅ×³ö -1
+        // ï¿½ï¿½Â·ï¿½ï¿½ï¿½ß£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×³ï¿½ -1
         ret["response"]["source"] = string("-1");
         ret["response"]["target"] = string("-1");
     } else {
         // =====================================================================
-        // ÏÂÃæ²¿·ÖÎªËæ»úÊ¾Àý£¬ÓÅ»¯Ëã·¨¸ü¸ÄÏÂ·½¼´¿É
+        // ï¿½ï¿½ï¿½æ²¿ï¿½ï¿½Îªï¿½ï¿½ï¿½Ê¾ï¿½ï¿½ï¿½ï¿½ï¿½Å»ï¿½ï¿½ã·¨ï¿½ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½
         // =====================================================================
         srand(time(nullptr));
         int choice = rand() % retMoves.size();
         auto selMove = retMoves[choice]; 
         
-        // ½«ÄÚ²¿µÄÊý×Ö×ø±ê×ª»»Îª PGN ×Ö·û´®¸ñÊ½
+        // ï¿½ï¿½ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½Îª PGN ï¿½Ö·ï¿½ï¿½ï¿½ï¿½ï¿½Ê½
         ret["response"]["source"] = string(1, pgnint2char(selMove.source_x)) + string(1, int2char(selMove.source_y));
         ret["response"]["target"] = string(1, pgnint2char(selMove.target_x)) + string(1, int2char(selMove.target_y));
     }
-    // ×ªÎª JSON ¸ñÊ½²¢´òÓ¡µ½±ê×¼Êä³ö
+    // ×ªÎª JSON ï¿½ï¿½Ê½ï¿½ï¿½ï¿½ï¿½Ó¡ï¿½ï¿½ï¿½ï¿½×¼ï¿½ï¿½ï¿½
     Json::FastWriter writer;
     cout << writer.write(ret) << endl;
 }
 
-// ´¦ÀíÀ´×ÔÆ½Ì¨µÄÊäÈë£¬»Ö¸´ÆåÅÌ×´Ì¬
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ½Ì¨ï¿½ï¿½ï¿½ï¿½ï¿½ë£¬ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬
 void getInputBotzone(Chess& chess) {
     string str;
-    getline(cin, str); // ´Ó±ê×¼ÊäÈë¶ÁÈ¡ JSON ×Ö·û´®
+    getline(cin, str); // ï¿½Ó±ï¿½×¼ï¿½ï¿½ï¿½ï¿½ï¿½È¡ JSON ï¿½Ö·ï¿½ï¿½ï¿½
     Json::Reader reader;
     Json::Value input;
     reader.parse(str, input);
     
-    // ¼ÆËãÀúÊ·»ØºÏÊý
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê·ï¿½Øºï¿½ï¿½ï¿½
     int turnID = input["responses"].size();
     
-    // Èç¹ûµÚÒ»»ØºÏÊÕµ½µÄÆðµãÊÇ"-1", ËµÃ÷ÎÒÊÇºì·½ÏÈÊÖ
+    // ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½Øºï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½"-1", Ëµï¿½ï¿½ï¿½ï¿½ï¿½Çºì·½ï¿½ï¿½ï¿½ï¿½
     colorType currBotColor =
             input["requests"][(Json::Value::UInt) 0]["source"].asString() == "-1" ?  RED : BLACK;
             
     string curSource, curTarget;
     
-    // ±éÀúÀúÊ·»ØºÏ¼ÇÂ¼
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê·ï¿½ØºÏ¼ï¿½Â¼
     for (int i = 0; i < turnID; i++)
     {
-        // »Ö¸´¶ÔÊÖµÄÀúÊ·×ß²½
+        // ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½Ê·ï¿½ß²ï¿½
         curSource = input["requests"][i]["source"].asString();
         curTarget = input["requests"][i]["target"].asString();
         if (curSource != "-1") {
@@ -260,10 +260,10 @@ void getInputBotzone(Chess& chess) {
             if (!chess.isMoveValidWithForbidden(curMove)) {
                 throw std::runtime_error("input is not valid!");
             }
-            chess.makeMoveAssumeLegal(curMove); // ÔÚÒýÇæÄÚ²¿×ß×Ó
+            chess.makeMoveAssumeLegal(curMove); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú²ï¿½ï¿½ï¿½ï¿½ï¿½
         }
 
-        // »Ö¸´¼º·½µÄÀúÊ·×ß²½
+        // ï¿½Ö¸ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê·ï¿½ß²ï¿½
         curSource = input["responses"][i]["source"].asString();
         curTarget = input["responses"][i]["target"].asString();
         Move curMove(curSource, curTarget);
@@ -273,7 +273,7 @@ void getInputBotzone(Chess& chess) {
         chess.makeMoveAssumeLegal(curMove);
     }
 
-    // ½ÓÊÕ¶ÔÊÖ¸Õ¸Õ×ßµÄÒ»²½
+    // ï¿½ï¿½ï¿½Õ¶ï¿½ï¿½Ö¸Õ¸ï¿½ï¿½ßµï¿½Ò»ï¿½ï¿½
     curSource = input["requests"][turnID]["source"].asString();
     curTarget = input["requests"][turnID]["target"].asString();
     if (curSource != "-1") {
@@ -285,18 +285,18 @@ void getInputBotzone(Chess& chess) {
     }
 }
 
-// ³õÊ¼»¯ÆåÅÌ£¨±ê×¼ÖÐ¹úÏóÆå¿ª¾ÖÕ¾Î»£©
+// ï¿½ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½Ì£ï¿½ï¿½ï¿½×¼ï¿½Ð¹ï¿½ï¿½ï¿½ï¿½å¿ªï¿½ï¿½Õ¾Î»ï¿½ï¿½
 void Chess::resetBoard() {
     vector<Grid> currState;
     Grid boardInfo[BOARDWIDTH][BOARDHEIGHT];
-    // È«²¿³õÊ¼»¯Îª¿Õ
+    // È«ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½Îªï¿½ï¿½
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
             boardInfo[x][y] = Grid(None, EMPTY);
         }
     }
 
-    // °Ú·Åºì·½
+    // ï¿½Ú·Åºì·½
     boardInfo[0][0] = Grid(Rook, RED);
     boardInfo[1][0] = Grid(Knight, RED);
     boardInfo[2][0] = Grid(Bishop, RED);
@@ -314,7 +314,7 @@ void Chess::resetBoard() {
     boardInfo[6][3] = Grid(Pawn, RED);
     boardInfo[8][3] = Grid(Pawn, RED);
 
-    // °Ú·ÅºÚ·½
+    // ï¿½Ú·ÅºÚ·ï¿½
     boardInfo[0][9] = Grid(Rook, BLACK);
     boardInfo[1][9] = Grid(Knight, BLACK);
     boardInfo[2][9] = Grid(Bishop, BLACK);
@@ -332,7 +332,7 @@ void Chess::resetBoard() {
     boardInfo[6][6] = Grid(Pawn, BLACK);
     boardInfo[8][6] = Grid(Pawn, BLACK);
 
-    // ÐòÁÐ»¯·ÅÈëÀúÊ·×´Ì¬µÚÒ»²ã
+    // ï¿½ï¿½ï¿½Ð»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê·×´Ì¬ï¿½ï¿½Ò»ï¿½ï¿½
     for (int mpos = 0; mpos < BOARDWIDTH * BOARDHEIGHT; mpos++) {
         currState.push_back(boardInfo[pos2x(mpos)][pos2y(mpos)]);
     }
@@ -340,38 +340,38 @@ void Chess::resetBoard() {
     state.push_back(currState);
 }
 
-// ³õÊ¼»¯×´Ì¬
+// ï¿½ï¿½Ê¼ï¿½ï¿½×´Ì¬
 Chess::Chess() {
     resetBoard();
     continuePeaceTurn.clear();
     lastMoveEaten.clear();
     continuePeaceTurn.push_back(0);
     lastMoveEaten.push_back(false);
-    currColor = RED; // ºìÏÈ
+    currColor = RED; // ï¿½ï¿½ï¿½ï¿½
     currTurnId = 0;
 }
 
-// »ùÓÚ¹æÔòÉú³Éµ±Ç°·½ËùÓÐµÄºÏ·¨×ß·¨
+// ï¿½ï¿½ï¿½Ú¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Éµï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ÐµÄºÏ·ï¿½ï¿½ß·ï¿½
 void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
     legalMoves.clear();
-    // ±éÀúÕû¸öÆåÅÌÑ°ÕÒ¼º·½µÄÆå×Ó
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ°ï¿½Ò¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
             auto& curGrid = state[currTurnId][xy2pos(x, y)];
             if (curGrid.color == currColor) {
                 switch (curGrid.type) {
-                    case King: { // ½«/Ë§
+                    case King: { // ï¿½ï¿½/Ë§
                         for (int dir = 0; dir < 4; dir++) {
                             int tx = x + dx_strai[dir];
                             int ty = y + dy_strai[dir];
-                            if (!inKingArea(tx, ty, curGrid.color)) { // ±ØÐëÔÚ¾Å¹¬¸ñÄÚ
+                            if (!inKingArea(tx, ty, curGrid.color)) { // ï¿½ï¿½ï¿½ï¿½ï¿½Ú¾Å¹ï¿½ï¿½ï¿½ï¿½ï¿½
                                 continue;
                             }
                             auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                            if (tGrid.color == currColor) // Ä¿±ê¸ñ×Ó²»ÄÜÊÇ×Ô¼ºµÄÆå×Ó
+                            if (tGrid.color == currColor) // Ä¿ï¿½ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                                 continue;
                             if (mustDefend) {
-                                // ±ØÐë·ÀÊØ£ºÈç¹û×ßÍêÕâÒ»²½ÀÏ½«»¹±»¹¥»÷£¨ËÍ½«£©£¬ÔòÉáÆú
+                                // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ï½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Í½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                                 if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
                                     legalMoves.emplace_back(x, y, tx, ty);
                                 }
@@ -381,10 +381,10 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         }
                         break;
                     }
-                    case Assistant: { // Ê¿/ÊË
+                    case Assistant: { // Ê¿/ï¿½ï¿½
                         for (int dir = 0; dir < 4; dir++) {
                             int tx = x + dx_ob[dir], ty = y + dy_ob[dir];
-                            if (!inKingArea(tx, ty, curGrid.color)) { // ±ØÐëÔÚ¾Å¹¬¸ñÄÚÐ±×ß
+                            if (!inKingArea(tx, ty, curGrid.color)) { // ï¿½ï¿½ï¿½ï¿½ï¿½Ú¾Å¹ï¿½ï¿½ï¿½ï¿½ï¿½Ð±ï¿½ï¿½
                                 continue;
                             }
                             auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
@@ -401,9 +401,9 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         }
                         break;
                     }
-                    case Pawn: { // ±ø/×ä
-                        int forwardOne = (curGrid.color == RED ? 1 : -1); // ±øÖ»ÄÜÇ°½ø
-                        bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5)); // ÊÇ·ñÒÑ¹ýºÓ
+                    case Pawn: { // ï¿½ï¿½/ï¿½ï¿½
+                        int forwardOne = (curGrid.color == RED ? 1 : -1); // ï¿½ï¿½Ö»ï¿½ï¿½Ç°ï¿½ï¿½
+                        bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5)); // ï¿½Ç·ï¿½ï¿½Ñ¹ï¿½ï¿½ï¿½
                         int tx = x, ty = y + forwardOne;
                         if (!inBoard(tx, ty)) {
                             continue;
@@ -419,7 +419,7 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         } else {
                             legalMoves.emplace_back(x, y, tx, ty);
                         }
-                        if (crossMidLine) { // Èç¹û¹ýºÓÁË£¬¿ÉÒÔ×óÓÒÆ½ÒÆ
+                        if (crossMidLine) { // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ½ï¿½ï¿½
                             for (int dir = 0; dir < 2; dir++) {
                                 int ox = x + dx_lr[dir], oy = y;
                                 if (!inBoard(ox, oy)) {
@@ -440,18 +440,18 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         }
                         break;
                     }
-                    case Knight: { // Âí
+                    case Knight: { // ï¿½ï¿½
                         for (int dir = 0; dir < 8; dir++) {
                             int tx = x + dx_knight[dir], ty = y + dy_knight[dir];
                             if (!inBoard(tx, ty)) {
                                 continue;
                             }
                             auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                            // õ¿ÂíÍÈ¼ì²é£¬»ñÈ¡µ±Ç°·½ÏòµÄÂíÍÈ×ø±ê
+                            // ï¿½ï¿½ï¿½ï¿½ï¿½È¼ï¿½é£¬ï¿½ï¿½È¡ï¿½ï¿½Ç°ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                             int fx = x + dx_knight_foot[dir], fy = y + dy_knight_foot[dir];
                             auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
                             
-                            // Èç¹ûÄ¿±êµãÊÇ×Ô¼ºÈË£¬»òÕßÂíÍÈÎ»ÖÃÓÐÆå×Ó(²»Îª¿Õ)£¬Ôò²»¿É×ß
+                            // ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ô¼ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½(ï¿½ï¿½Îªï¿½ï¿½)ï¿½ï¿½ï¿½ò²»¿ï¿½ï¿½ï¿½
                             if (tGrid.color == currColor || fGrid.color != EMPTY) {
                                 continue;
                             }
@@ -465,14 +465,14 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         }
                         break;
                     }
-                    case Bishop: { // Ïó/Ïà
+                    case Bishop: { // ï¿½ï¿½/ï¿½ï¿½
                         for (int dir = 0; dir < 4; dir++) {
                             int tx = x + dx_bishop[dir], ty = y + dy_bishop[dir];
-                            // Ïó²»ÄÜ¹ýºÓ
+                            // ï¿½ï¿½ï¿½Ü¹ï¿½ï¿½ï¿½
                             if (!inBoard(tx, ty) || !inColorArea(tx, ty, currColor)) {
                                 continue;
                             }
-                            // ¼ì²éÏóÑÛÊÇ·ñ±»Èû×¡
+                            // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½×¡
                             int ex = x + dx_bishop_eye[dir], ey = y + dy_bishop_eye[dir];
                             auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
                             auto& eGrid = state[currTurnId][xy2pos(ex, ey)];
@@ -489,16 +489,16 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         }
                         break;
                     }
-                    case Rook: { // ³µ
+                    case Rook: { // ï¿½ï¿½
                         for (int dir = 0; dir < 4; dir++) {
                             int tx = x + dx_strai[dir];
                             int ty = y + dy_strai[dir];
                             while (inBoard(tx, ty)) {
                                 auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
                                 if (tGrid.color == currColor) {
-                                    break; // Óöµ½×Ô¼ºÈË£¬×è¶ÏÂ·Ïß
+                                    break; // ï¿½ï¿½ï¿½ï¿½ï¿½Ô¼ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½
                                 } else if (tGrid.color == oppColor()) {
-                                    // Óöµ½µÐÈË£¬¿ÉÒÔ³Ôµô£¬Í£×¡
+                                    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë£ï¿½ï¿½ï¿½ï¿½Ô³Ôµï¿½ï¿½ï¿½Í£×¡
                                     if (mustDefend) {
                                         if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
                                             legalMoves.emplace_back(x, y, tx, ty);
@@ -508,7 +508,7 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                                     }
                                     break;
                                 } else {
-                                    // ¿ÕµØ£¬¿ÉÒÔ×ß
+                                    // ï¿½ÕµØ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                                     assert(tGrid.color == EMPTY);
                                     if (mustDefend) {
                                         if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
@@ -524,19 +524,19 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                         }
                         break;
                     }
-                    case Cannon: { // ÅÚ
+                    case Cannon: { // ï¿½ï¿½
                         for (int dir = 0; dir < 4; dir++) {
                             int tx = x + dx_strai[dir];
                             int ty = y + dy_strai[dir];
                             while (inBoard(tx, ty)) {
-                                // Í³¼ÆÆðµãºÍÄ¿±êµãÖ®¼äÓÐ¶àÉÙ¸öÆå×Ó
+                                // Í³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½Ö®ï¿½ï¿½ï¿½Ð¶ï¿½ï¿½Ù¸ï¿½ï¿½ï¿½ï¿½ï¿½
                                 int betweenNum = betweenNotEmptyNum(x, y, tx, ty);
                                 if (betweenNum > 1) {
-                                    break; // ¸ôÁËÁ½¸ö¼°ÒÔÉÏµÄÆå×Ó£¬²»ÄÜ×ß£¬×è¶Ï
+                                    break; // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ïµï¿½ï¿½ï¿½ï¿½Ó£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ß£ï¿½ï¿½ï¿½ï¿½
                                 } else if (betweenNum == 1) {
-                                    // ÖÐ¼äÓÐ1¸öÅÚ¼Ü
+                                    // ï¿½Ð¼ï¿½ï¿½ï¿½1ï¿½ï¿½ï¿½Ú¼ï¿½
                                     auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                                    // ÅÚ³Ô×Ó±ØÐëÄ¿±êÊÇÓÐµÐ¾üµÄ¸ñ×Ó
+                                    // ï¿½Ú³ï¿½ï¿½Ó±ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½ï¿½ï¿½ÐµÐ¾ï¿½ï¿½Ä¸ï¿½ï¿½ï¿½
                                     if (tGrid.color == currColor || tGrid.color == EMPTY) {
                                         tx += dx_strai[dir];
                                         ty += dy_strai[dir];
@@ -550,7 +550,7 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
                                         legalMoves.emplace_back(x, y, tx, ty);
                                     }
                                 } else if (betweenNum == 0) {
-                                    // ÖÐ¼äÎÞÆå×Ó£¬ÆÕÍ¨ÒÆ¶¯
+                                    // ï¿½Ð¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó£ï¿½ï¿½ï¿½Í¨ï¿½Æ¶ï¿½
                                     auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
                                     if (tGrid.color != EMPTY) {
                                         tx += dx_strai[dir];
@@ -579,17 +579,17 @@ void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
     }
 }
 
-// ÅÐ¶Ï×ø±êÊÇ·ñÔ½½ç
+// ï¿½Ð¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½Ô½ï¿½ï¿½
 bool Chess::inBoard(int mx, int my) {
     return mx >= 0 && mx < BOARDWIDTH && my >= 0 && my < BOARDHEIGHT;
 }
 
-// »ñÈ¡¶ÔÊÖµÄÑÕÉ«
+// ï¿½ï¿½È¡ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½É«
 colorType Chess::oppColor() {
     return currColor == BLACK ? RED : BLACK;
 }
 
-// ¼ì²éÄ³¸ö Move ÊÇ·ñÔÚºÏ·¨²½ÁÐ±íÄÚ
+// ï¿½ï¿½ï¿½Ä³ï¿½ï¿½ Move ï¿½Ç·ï¿½ï¿½ÚºÏ·ï¿½ï¿½ï¿½ï¿½Ð±ï¿½ï¿½ï¿½
 bool Chess::isLegalMove(const Move &move, bool mustDefend) {
     vector<Move> currLegalMoves;
     generateMoves(currLegalMoves, mustDefend);
@@ -597,10 +597,10 @@ bool Chess::isLegalMove(const Move &move, bool mustDefend) {
     return fi_iter != currLegalMoves.end();
 }
 
-// Ö´ÐÐÒ»²½Æå£¨¼ÙÉèÕâ²½ÆåºÏ·¨£©
+// Ö´ï¿½ï¿½Ò»ï¿½ï¿½ï¿½å£¨ï¿½ï¿½ï¿½ï¿½ï¿½â²½ï¿½ï¿½Ï·ï¿½ï¿½ï¿½
 bool Chess::makeMoveAssumeLegal(const Move &move) {
     int nextPeaceTrun =  continuePeaceTurn[currTurnId] + 1;
-    // ¸´ÖÆµ±Ç°×´Ì¬×÷ÎªÐÂµÄÒ»²ã×´Ì¬
+    // ï¿½ï¿½ï¿½Æµï¿½Ç°×´Ì¬ï¿½ï¿½Îªï¿½Âµï¿½Ò»ï¿½ï¿½×´Ì¬
     vector<Grid> copyState = state[currTurnId];
     state.push_back(copyState);
     currTurnId++;
@@ -608,7 +608,7 @@ bool Chess::makeMoveAssumeLegal(const Move &move) {
     auto& sourceGrid = state[currTurnId][xy2pos(move.source_x, move.source_y)];
     auto& targetGrid = state[currTurnId][xy2pos(move.target_x, move.target_y)];
     
-    // Èç¹û³Ô×Ó£¬ÖØÖÃ×ÔÈ»ÏÞ×Å»ØºÏÊý
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ó£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È»ï¿½ï¿½ï¿½Å»Øºï¿½ï¿½ï¿½
     if (targetGrid.color == oppColor()) {
         nextPeaceTrun = 0;
         lastMoveEaten.push_back(true);
@@ -616,22 +616,22 @@ bool Chess::makeMoveAssumeLegal(const Move &move) {
         lastMoveEaten.push_back(false);
     }
     
-    // ¸üÐÂÄ¿±ê¸ñ×´Ì¬£¨ÒÆ¶¯¹ýÈ¥£©
+    // ï¿½ï¿½ï¿½ï¿½Ä¿ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½Æ¶ï¿½ï¿½ï¿½È¥ï¿½ï¿½
     targetGrid.type = sourceGrid.type;
     targetGrid.color = sourceGrid.color;
     assert(sourceGrid.color == currColor);
 
-    // Çå¿ÕÆðÊ¼¸ñ×´Ì¬
+    // ï¿½ï¿½ï¿½ï¿½ï¿½Ê¼ï¿½ï¿½×´Ì¬
     sourceGrid.color = EMPTY;
     sourceGrid.type = None;
 
     continuePeaceTurn.push_back(nextPeaceTrun);
-    // ÇÐ»»³Ö»ØºÏ·½
+    // ï¿½Ð»ï¿½ï¿½Ö»ØºÏ·ï¿½
     currColor = oppColor();
     return true;
 }
 
-// ¼ì²é×ø±êÎª (mx, my) µÄ¸ñ×ÓÊÇ·ñÊÜµ½ color ·½µÄ¹¥»÷
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Îª (mx, my) ï¿½Ä¸ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½Üµï¿½ color ï¿½ï¿½ï¿½Ä¹ï¿½ï¿½ï¿½
 bool Chess::attacked(colorType color, int mx, int my) {
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
@@ -641,7 +641,7 @@ bool Chess::attacked(colorType color, int mx, int my) {
             }
             int dex = mx - x, dey = my - y;
             switch (curGrid.type) {
-                case King: { // ¼ì²é°×Á³½«£¨ÀÏ½«¶ÔÃæ³ÔÀÏ½«£©
+                case King: { // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï½ï¿½ï¿½ï¿½
                     if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my)) {
                         return true;
                     }
@@ -655,7 +655,7 @@ bool Chess::attacked(colorType color, int mx, int my) {
                     }
                     break;
                 }
-                case Knight: { // ÂíµÄ¹¥»÷¼ì²â
+                case Knight: { // ï¿½ï¿½ï¿½Ä¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     if (abs(dex) == 2 && abs(dey) == 1) {
                         int fx = x + (dex > 0 ? 1 : -1), fy = y;
                         auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
@@ -671,7 +671,7 @@ bool Chess::attacked(colorType color, int mx, int my) {
                     }
                     break;
                 }
-                case Bishop: { // ÏóµÄ¹¥»÷¼ì²â
+                case Bishop: { // ï¿½ï¿½Ä¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     if (abs(dex) == 2 && abs(dey) == 2) {
                         int ex = x + dex / 2, ey = y + dey / 2;
                         auto& eGrid = state[currTurnId][xy2pos(ex, ey)];
@@ -681,13 +681,13 @@ bool Chess::attacked(colorType color, int mx, int my) {
                     }
                     break;
                 }
-                case Rook: { // ³µµÄ¹¥»÷¼ì²â
+                case Rook: { // ï¿½ï¿½ï¿½Ä¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my)) {
                         return true;
                     }
                     break;
                 }
-                case Pawn: { // ±øµÄ¹¥»÷¼ì²â
+                case Pawn: { // ï¿½ï¿½ï¿½Ä¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
                     int forwardOne = (curGrid.color == RED ? 1 : -1);
                     bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
                     if (dex == 0 && dey == forwardOne) {
@@ -698,7 +698,7 @@ bool Chess::attacked(colorType color, int mx, int my) {
                     }
                     break;
                 }
-                case Cannon: { // ÅÚµÄ¹¥»÷¼ì²â£¨±ØÐë¸ôÒ»¸öÆå×Ó£©
+                case Cannon: { // ï¿½ÚµÄ¹ï¿½ï¿½ï¿½ï¿½ï¿½â£¨ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ó£ï¿½
                     if (inSameStraightLine(x, y, mx, my) && betweenNotEmptyNum(x,y,mx,my) == 1) {
                         return true;
                     }
@@ -714,7 +714,7 @@ bool Chess::attacked(colorType color, int mx, int my) {
     return false;
 }
 
-// ¼ì²éÁ½µãÁ¬ÏßÖÐ¼äÊÇ·ñÎª¿Õ£¨²»º¬ÆðÖ¹µã£©
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¼ï¿½ï¿½Ç·ï¿½Îªï¿½Õ£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö¹ï¿½ã£©
 bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey) {
     assert(inSameStraightLine(sx, sy, ex, ey));
     int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
@@ -729,7 +729,7 @@ bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey) {
     return true;
 }
 
-// ¼ì²éÊÇ·ñÔÚÍ¬ÐÐ/Í¬ÁÐ/Í¬Ð±Ïß
+// ï¿½ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½Í¬ï¿½ï¿½/Í¬ï¿½ï¿½/Í¬Ð±ï¿½ï¿½
 bool Chess::inSameLine(int sx, int sy, int ex, int ey) {
     int dex = ex - sx, dey = ey - sy;
     return dex == dey || dex == -dey || dex == 0 || dey == 0;
@@ -743,13 +743,13 @@ bool Chess::inSameObiqueLine(int sx, int sy, int ex, int ey) {
     return dex == dey || dex == -dey;
 }
 
-// ²âÊÔÄ³Ò»²½Æå×ßÍêÖ®ºó£¬¼º·½ÀÏ½«ÊÇ·ñÒÀÈ»´¦ÓÚ±»¹¥»÷×´Ì¬
+// ï¿½ï¿½ï¿½ï¿½Ä³Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö®ï¿½ó£¬¼ï¿½ï¿½ï¿½ï¿½Ï½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½È»ï¿½ï¿½ï¿½Ú±ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬
 bool Chess::isMyKingAttackedAfterMove(const Move &move) {
     colorType originColor = currColor;
-    // ¼ÙÉè×ßÕâÒ»²½
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½
     makeMoveAssumeLegal(move);
     int kingX = -1, kingY = -1;
-    // Ñ°ÕÒ¼º·½ÀÏ½«
+    // Ñ°ï¿½Ò¼ï¿½ï¿½ï¿½ï¿½Ï½ï¿½
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
             auto& curGrid = state[currTurnId][xy2pos(x, y)];
@@ -759,9 +759,9 @@ bool Chess::isMyKingAttackedAfterMove(const Move &move) {
             }
         }
     }
-    // ¼ì²âÊÇ·ñ±»¹¥»÷
+    // ï¿½ï¿½ï¿½ï¿½Ç·ñ±»¹ï¿½ï¿½ï¿½
     bool myKingStillAttacked = attacked(oppColor(originColor), kingX, kingY);
-    // ±ØÐë³·Ïú×´Ì¬
+    // ï¿½ï¿½ï¿½ë³·ï¿½ï¿½×´Ì¬
     undoMove();
     assert(currColor == originColor);
     return myKingStillAttacked;
@@ -771,13 +771,13 @@ bool Chess::isMoveValid(const Move& move, bool mustDefend) {
     return isLegalMove(move, mustDefend);
 }
 
-// ¼ì²é×ßÍêÕâÒ»²½ÊÇ·ñÄÜÓ®
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ç·ï¿½ï¿½ï¿½Ó®
 bool Chess::winAfterMove(const Move &move) {
     makeMoveAssumeLegal(move);
     vector<Move> oppLegalMoves;
     generateMoves(oppLegalMoves);
     undoMove();
-    return oppLegalMoves.empty(); // ¶ÔÊÖÎÞ²½¿É×ßÎÒ·½Ê¤Àû
+    return oppLegalMoves.empty(); // ï¿½ï¿½ï¿½ï¿½ï¿½Þ²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò·ï¿½Ê¤ï¿½ï¿½
 }
 
 bool Chess::currKingAttacked(const Move &move) {
@@ -812,7 +812,7 @@ bool Chess::isOppKingAttackedAfterMove(const Move &move) {
     return oppKingBeingAttacked;
 }
 
-// ³¬¹ý60²½ÎÞ³Ô×ÓÅÐºÍ
+// ï¿½ï¿½ï¿½ï¿½60ï¿½ï¿½ï¿½Þ³ï¿½ï¿½ï¿½ï¿½Ðºï¿½
 bool Chess::exceedMaxPeaceState() {
     return continuePeaceTurn[currTurnId] >= 60 - 1;
 }
@@ -847,7 +847,7 @@ bool Chess::inColorArea(int mx, int my, colorType mcolor) {
     }
 }
 
-// Í³¼ÆÆðµãºÍÖÕµãÁ¬ÏßÖÐ¼äµÄÆå×ÓÊýÁ¿£¨ÓÃÓÚÅÚ×ßÆå¼ì²â£©
+// Í³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½â£©
 int Chess::betweenNotEmptyNum(int sx, int sy, int ex, int ey) {
     assert(inSameStraightLine(sx, sy, ex, ey));
     int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
@@ -868,42 +868,42 @@ colorType Chess::oppColor(colorType mcolor) {
     return mcolor == RED ? BLACK : RED;
 }
 
-// ³·ÏúÉÏÒ»²½²Ù×÷
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 void Chess::undoMove() {
     if (currTurnId == 0) {
         return;
     }
-    state.pop_back(); // ½«ÆåÅÌ×´Ì¬»ØÍËÒ»²ã
+    state.pop_back(); // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×´Ì¬ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½
     currTurnId--;
     currColor = oppColor();
     continuePeaceTurn.pop_back();
     lastMoveEaten.pop_back();
 }
 
-// Éú³É×ñÊØ¡°½ûÖ¹³¤½«/³¤×½µÈÖØ¸´¾ÖÃæ¡±µÄºÏ·¨²½
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¡ï¿½ï¿½ï¿½Ö¹ï¿½ï¿½ï¿½ï¿½/ï¿½ï¿½×½ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½æ¡±ï¿½ÄºÏ·ï¿½ï¿½ï¿½
 void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend) {
     vector<Move> firstMoves;
     generateMoves(firstMoves, mustDefend);
     legalMoves.clear();
     for (const auto& move : firstMoves) {
-        // Èç¹û´Ë²½Ã»ÓÐµ¼ÖÂÖØ¸´ËÀÑ­»·£¬Ôò¼ÓÈëºÏ·¨ÁÐ±í
+        // ï¿½ï¿½ï¿½ï¿½Ë²ï¿½Ã»ï¿½Ðµï¿½ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½Ñ­ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ï·ï¿½ï¿½Ð±ï¿½
         if (!repeatAfterMove(move)) {
             legalMoves.push_back(move);
         }
     }
 }
 
-// ¼ì²éÄ³¸ö²½ÊÇ·ñ»áµ¼ÖÂÈý´ÎÖØ¸´¾ÖÃæ£¨³¤½«¡¢³¤×½Í¨³£ÔÚ´Ë´¦À¹½Ø£©
+// ï¿½ï¿½ï¿½Ä³ï¿½ï¿½ï¿½ï¿½ï¿½Ç·ï¿½áµ¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½æ£¨ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×½Í¨ï¿½ï¿½ï¿½Ú´Ë´ï¿½ï¿½ï¿½ï¿½Ø£ï¿½
 bool Chess::repeatAfterMove(const Move& move) {
     makeMoveAssumeLegal(move);
     int tmp_id = currTurnId;
-    // Èç¹ûÓÐ³Ô×Ó·¢Éú£¬¾ÖÃæ²»¿ÉÄæ×ª£¬¾ø²»¿ÉÄÜÖØ¸´£¬Ö±½Ó·µ»Ø false
+    // ï¿½ï¿½ï¿½ï¿½Ð³ï¿½ï¿½Ó·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½æ²»ï¿½ï¿½ï¿½ï¿½×ªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½Ö±ï¿½Ó·ï¿½ï¿½ï¿½ false
     if (lastMoveEaten[tmp_id]) {
         undoMove();
         return false;
     }
     
-    // ÏòÇ°×·ËÝÖ±µ½ÉÏ´Î³Ô×Ó»òÕß¿ª¾Ö
+    // ï¿½ï¿½Ç°×·ï¿½ï¿½Ö±ï¿½ï¿½ï¿½Ï´Î³ï¿½ï¿½Ó»ï¿½ï¿½ß¿ï¿½ï¿½ï¿½
     while (true) {
         if (tmp_id <= 1) {
             break;
@@ -911,10 +911,10 @@ bool Chess::repeatAfterMove(const Move& move) {
         if (lastMoveEaten[tmp_id-2]) {
             break;
         }
-        tmp_id -= 2; // Ö»¼ì²é¸Ã·½×ßÆåµÄ¾ÖºÏ
+        tmp_id -= 2; // Ö»ï¿½ï¿½ï¿½Ã·ï¿½ï¿½ï¿½ï¿½ï¿½Ä¾Öºï¿½
     }
     
-    // Í³¼ÆÅÌÃæÍêÈ«Ò»ÑùµÄ´ÎÊý
+    // Í³ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È«Ò»ï¿½ï¿½ï¿½Ä´ï¿½ï¿½ï¿½
     int repeatTime = 0;
     for (int id = currTurnId; id >= tmp_id; id -= 2) {
         if (state[id] == state[currTurnId]) {
@@ -922,7 +922,7 @@ bool Chess::repeatAfterMove(const Move& move) {
         }
     }
     undoMove();
-    return repeatTime >= 3; // ´ïµ½»ò³¬¹ý3´Î£¬ÊôÓÚÎ¥¹æÖØ¸´¾ÖÃæ
+    return repeatTime >= 3; // ï¿½ïµ½ï¿½ò³¬¹ï¿½3ï¿½Î£ï¿½ï¿½ï¿½ï¿½ï¿½Î¥ï¿½ï¿½ï¿½Ø¸ï¿½ï¿½ï¿½ï¿½ï¿½
 }
 
 bool Chess::isLegalMoveWithForbidden(const Move& move, bool mustDefend) {
@@ -948,21 +948,21 @@ bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
 
 
 
-//ÒÔÏÂÎª¾ö²ßÊµÏÖµÄËã·¨
+//ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½Êµï¿½Öµï¿½ï¿½ã·¨
 
-//1.Ô­´úÂëÒÑ¾­ÊµÏÖÁËºÏ·¨²½µÄÉú³É£¬ËùÒÔÖ»ÐèÒªµ÷ÓÃvoid generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true) »ñÈ¡ºÏ·¨ËùÓÐ²½
-//2.ÔÚËÑË÷Ëã·¨ÖÐÄ£ÄâÏÂÒ»²½Æåµ÷ÓÃbool makeMoveAssumeLegal(const Move& move)
-//3.ÔÚËÑË÷Ëã·¨ÖÐ³·ÏúÄ£ÄâµÄÆå²½µ÷ÓÃvoid undoMove()
+//1.Ô­ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¾ï¿½Êµï¿½ï¿½ï¿½ËºÏ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½É£ï¿½ï¿½ï¿½ï¿½ï¿½Ö»ï¿½ï¿½Òªï¿½ï¿½ï¿½ï¿½void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true) ï¿½ï¿½È¡ï¿½Ï·ï¿½ï¿½ï¿½ï¿½Ð²ï¿½
+//2.ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ã·¨ï¿½ï¿½Ä£ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½bool makeMoveAssumeLegal(const Move& move)
+//3.ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ã·¨ï¿½Ð³ï¿½ï¿½ï¿½Ä£ï¿½ï¿½ï¿½ï¿½å²½ï¿½ï¿½ï¿½ï¿½void undoMove()
 
 
-// ÆÀ¹Àº¯Êý
+// ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 int evaluateBoard(const Chess& chess)
 {
 
 }
 
 
-// alpha-beta ËÑË÷
+// alpha-beta ï¿½ï¿½ï¿½ï¿½
 int alphaBetaSearch()
 {
 

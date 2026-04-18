@@ -101,15 +101,13 @@ struct Grid {
 }; // 描述棋盘上单个格子（当前包含的棋子类型和颜色）的数据结构
 
 class Chess {
+    friend class ChessAI; //ChessAI拥有调用Chess所有方法和属性的权限！
 private:
     std::vector<std::vector<Grid>> state;
     int currTurnId;
     colorType currColor;
     vector<int> continuePeaceTurn;
     vector<int> lastMoveEaten;
-    //新增属性
-    vector<Grid> curstones;    //存储我方的棋子 一个容器内存储各种不同的棋子
-    vector<bool> isbeattacked; //存储我方的棋子是否会被吃，和curstone中的索引顺序一致
 public:
     Chess(); // 构造函数，初始化棋盘
     void resetBoard(); // 重置棋盘为初始状态
@@ -144,12 +142,28 @@ public:
     void printBoard(); // 打印当前棋盘
 
 
-    //新增函数 
-    void getcurstones(); //获取我方的棋子，使用currColor
+
     bool isattacked(colorType color,int mx,int my); 
-    bool iscurstonebeattacked(); //判断我当前的棋子(存储在curstones)是否可能被吃
+   
 };
 
+//产生策略类
+class ChessAI{
+public:
+    //ChessAI属性
+    Chess* board;                      //储存现有 棋局状态类(着法生成和状态显示类)
+    vector<Grid> curstones;            //储存现有 各个棋子状态
+    vector<bool> curattacked;           //我方的棋子是否被吃
+    vector<Move> curlegalmoves;        //由chess产生，当前合法的状态
+    vector<Move> eatenmoves;           //"死手"——产生吃子的着棋
+    vector<Move> plainmoves;           //"白手"——不产生吃子的着棋
+
+    //ChessAI方法
+    void getcurstones(void);
+    bool isattacked(colorType color,int mx,int my); //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
+    void generateMovesWithForbidden();          //对应board的同名方法
+
+};
 void getInputBotzone(Chess& chess); // 处理Botzone平台输入
 void giveOutputBotzone(Chess& chess); // 向Botzone平台输出落子
 
@@ -551,6 +565,7 @@ bool Chess::makeMoveAssumeLegal(const Move &move) {
 }
 
 // 判断将/帅在指定位置是否受特定颜色棋子攻击的函数定义
+// 对方的颜色 自身的将/帅位置
 bool Chess::attacked(colorType color, int mx, int my) {
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
@@ -872,27 +887,25 @@ bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
 }
 
 
-//获取我方的各个棋子
-void Chess::getcurstones(){
-    int Color = this->currColor;
-    //注意：y行x列,y(9->0),x(a->i),tmp(state[currTurnId][..],被展平为一维的9*10个格子)
+
+void ChessAI::getcurstones(){
+    int Color = this->board->currColor;
+    int tmp = this->board->currTurnId;
     for(int y = 9;y >= 0;y --){
         for(int x = 0;x <= 8;x ++){
-            if(state[currTurnId][xy2pos(x,y)].color == Color){
-                this->curstones.push_back(state[currTurnId][xy2pos(x,y)]);
-                if(state[currTurnId][xy2pos(x,y)].type == King){
-                    isbeattacked.push_back(attacked(oppColor(this->currColor),x,y));
-                }else{
-                    isbeattacked.push_back(isattacked(oppColor(this->currColor),x,y));
-                }
+            if(board->state[tmp][board->xy2pos(x,y)].color == Color){
+                curstones.push_back(board->state[tmp][board->xy2pos(x,y)]); //ChessAI中的curstones容器
+                curattacked.push_back(isattacked(board->oppColor(),x,y));   //ChessAI中的curattacked容器
             }
         }
     }
 }
 
+
 //由attacked接口 ： 非将帅，这一点是否受特定棋子攻击?
 //我方的各个棋子是否会被攻击
 //color为对方的color，我方的点为(mx,my)
+//保留该接口，在ChessAI中使用
 bool Chess::isattacked(colorType color,int mx,int my){
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
@@ -903,8 +916,8 @@ bool Chess::isattacked(colorType color,int mx,int my){
             int dex = mx - x, dey = my - y; //当前敌方棋子的坐标为(x,y) 
             switch (curGrid.type) {
                 case King: {
-                    //King不能超出九宫格
-                    if((abs(dex) == 1 && abs(dey) == 0 && abs(x - 4) <= 1) || (abs(dex) == 0 && abs(dey) == 1 && abs(x - 4) <= 1)){
+                    //King不能超出九宫格  我方是否在对方 将/帅 的九宫格内？
+                    if((abs(dex) == 1 && abs(dey) == 0 && inKingArea(mx,my,oppColor(currColor))) || (abs(dex) == 0 && abs(dey) == 1 && abs(dey) == 0 && inKingArea(mx,my,oppColor(currColor)))){
                         return true;
                     }
                     break;
@@ -976,4 +989,22 @@ bool Chess::isattacked(colorType color,int mx,int my){
     return false;
 }
 
+//传入对方的颜色 我方棋子的位置，验证对方是否能攻击到我方棋子
+bool ChessAI::isattacked(colorType color,int mx,int my){
+    if(color == board->currColor){
+        throw std::runtime_error("False color:expected oppsite color");
+    }
 
+    if(board->state[board->currTurnId][board->xy2pos(mx,my)].type == King){
+        return board->attacked(color,mx,my); 
+    }else{
+        return board->isattacked(color,mx,my);
+    }
+}
+
+
+//判断此次下子是否吃子
+
+//吃子的估值
+
+//非吃子的估值
