@@ -107,6 +107,9 @@ private:
     colorType currColor;
     vector<int> continuePeaceTurn;
     vector<int> lastMoveEaten;
+    //新增属性
+    vector<Grid> curstones;    //存储我方的棋子 一个容器内存储各种不同的棋子
+    vector<bool> isbeattacked; //存储我方的棋子是否会被吃，和curstone中的索引顺序一致
 public:
     Chess(); // 构造函数，初始化棋盘
     void resetBoard(); // 重置棋盘为初始状态
@@ -123,7 +126,7 @@ public:
     bool isLegalMoveWithForbidden(const Move& move, bool mustDefend=true); // 判断包含禁手规则下是否合法
     bool isMoveValidWithForbidden(const Move& move, bool mustDefend=true); // 验证包含禁手规则下的移动
     bool makeMoveAssumeLegal(const Move& move); // 假设合法并执行移动，更新状态
-    bool attacked(colorType color, int mx, int my); // 检查指定位置是否被某方颜色攻击
+    bool attacked(colorType color, int mx, int my); // 检查己方将/帅是否被某方颜色攻击
     bool betweenIsEmpty(int sx, int sy, int ex, int ey); // 判断两点之间是否没有棋子
     int betweenNotEmptyNum(int sx, int sy, int ex, int ey); // 计算两点之间非空棋子的数量
     static bool inSameLine(int sx, int sy, int ex, int ey); // 判断两点是否在同一直线或对角线
@@ -139,6 +142,12 @@ public:
     static int pos2x(int mpos); // 一维索引转X坐标
     static int pos2y(int mpos); // 一维索引转Y坐标
     void printBoard(); // 打印当前棋盘
+
+
+    //新增函数 
+    void getcurstones(); //获取我方的棋子，使用currColor
+    bool isattacked(colorType color,int mx,int my); 
+    bool iscurstonebeattacked(); //判断我当前的棋子(存储在curstones)是否可能被吃
 };
 
 void getInputBotzone(Chess& chess); // 处理Botzone平台输入
@@ -541,7 +550,7 @@ bool Chess::makeMoveAssumeLegal(const Move &move) {
     return true;
 }
 
-// 判断指定位置是否受特定颜色棋子攻击的函数定义
+// 判断将/帅在指定位置是否受特定颜色棋子攻击的函数定义
 bool Chess::attacked(colorType color, int mx, int my) {
     for (int x = 0; x < BOARDWIDTH; x++) {
         for (int y = 0; y < BOARDHEIGHT; y++) {
@@ -861,3 +870,110 @@ void Chess::printBoard() {
 bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
     return isLegalMoveWithForbidden(move, mustDefend);
 }
+
+
+//获取我方的各个棋子
+void Chess::getcurstones(){
+    int Color = this->currColor;
+    //注意：y行x列,y(9->0),x(a->i),tmp(state[currTurnId][..],被展平为一维的9*10个格子)
+    for(int y = 9;y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            if(state[currTurnId][xy2pos(x,y)].color == Color){
+                this->curstones.push_back(state[currTurnId][xy2pos(x,y)]);
+                if(state[currTurnId][xy2pos(x,y)].type == King){
+                    isbeattacked.push_back(attacked(oppColor(this->currColor),x,y));
+                }else{
+                    isbeattacked.push_back(isattacked(oppColor(this->currColor),x,y));
+                }
+            }
+        }
+    }
+}
+
+//由attacked接口 ： 非将帅，这一点是否受特定棋子攻击?
+//我方的各个棋子是否会被攻击
+//color为对方的color，我方的点为(mx,my)
+bool Chess::isattacked(colorType color,int mx,int my){
+    for (int x = 0; x < BOARDWIDTH; x++) {
+        for (int y = 0; y < BOARDHEIGHT; y++) {
+            auto& curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color != color) {
+                continue;
+            }
+            int dex = mx - x, dey = my - y; //当前敌方棋子的坐标为(x,y) 
+            switch (curGrid.type) {
+                case King: {
+                    //King不能超出九宫格
+                    if((abs(dex) == 1 && abs(dey) == 0 && abs(x - 4) <= 1) || (abs(dex) == 0 && abs(dey) == 1 && abs(x - 4) <= 1)){
+                        return true;
+                    }
+                    break;
+                }
+                case Assistant: {
+                    if (inKingArea(mx, my, oppColor(color))) {
+                        if (abs(dex) == 1 && abs(dey) == 1) {
+                            return true;
+                        }
+                    }
+                    break;
+                }
+                case Knight: {
+                    if (abs(dex) == 2 && abs(dey) == 1) {
+                        int fx = x + (dex > 0 ? 1 : -1), fy = y;
+                        auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
+                        if (fGrid.color == EMPTY) {
+                            return true;
+                        }
+                    } else if (abs(dex) == 1 && abs(dey) == 2) {
+                        int fx = x, fy = y + (dey > 0 ? 1 : -1);
+                        auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
+                        if (fGrid.color == EMPTY) {
+                            return true;
+                        }
+                    }
+                    break;
+                }
+                case Bishop: {
+                    if (abs(dex) == 2 && abs(dey) == 2) {
+                        int ex = x + dex / 2, ey = y + dey / 2;
+                        auto& eGrid = state[currTurnId][xy2pos(ex, ey)];
+                        if (eGrid.color == EMPTY) {
+                            return true;
+                        }
+                    }
+                    break;
+                }
+                case Rook: {
+                    if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my)) {
+                        return true;
+                    }
+                    break;
+                }
+                case Pawn: {
+                    int forwardOne = (curGrid.color == RED ? 1 : -1);
+                    bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
+                    if (dex == 0 && dey == forwardOne) {
+                        return true;
+                    }
+                    if (crossMidLine && (abs(dex) == 1 && dey == 0)) {
+                        return true;
+                    }
+                    break;
+                }
+                case Cannon: {
+                    if (inSameStraightLine(x, y, mx, my) && betweenNotEmptyNum(x,y,mx,my) == 1) {
+                        return true;
+                    }
+                    break;
+                }
+                case None: {
+                    throw std::runtime_error("color is not empty but type is none");
+                    break;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+
