@@ -654,21 +654,38 @@ static int SearchRoot(int nDepth) {
 // 如果低出边界则说明其他着法都将被杀。
 static bool SearchUnique(int vlBeta, int nDepth) {
   int vl, mv;
+  // 将根节点的着法列表标志位设为 ROOT_UNIQUE，这样在取下一步时会自动跳过第一个着法（即当前找到的最佳着法）
   Search2.MoveSort.ResetRoot(ROOT_UNIQUE);
-  // 跳过第一个着法
+  
+  // 遍历剩余的候选着法。注意，由于 ResetRoot 设置了 ROOT_UNIQUE，这里的循环实际上跳过了之前被认为是最佳的第一着法
   while ((mv = Search2.MoveSort.NextRoot()) != 0) {
+    // 尝试走出这一步棋
     if (Search.pos.MakeMove(mv)) {
+      // 对这步棋进行一次零窗口搜索（Zero Window Search / Null Window Search）
+      // 即用一个极小的窗口 (1-vlBeta, vlBeta) 评估这步棋。在主调用中 vlBeta 通常是 1 - WIN_VALUE
+      // 如果对手上一步是将军 (ChkChs > 0)，那么当前处于被将状态，采用将军延伸（不减小搜索深度，nDepth）
+      // 否则深度正常递减（nDepth - 1）
       vl = -SearchCut(1 - vlBeta, Search.pos.LastMove().ChkChs > 0 ? nDepth : nDepth - 1);
+      
+      // 撤销刚才尝试的走法，恢复局面
       Search.pos.UndoMakeMove();
+      
+      // bStop 为 true 表示搜索被打断（如时间用尽或收到停止指令）
+      // 如果在这个极低的期望阈值(vlBeta)下，评价函数返回的得分依然大于等于 vlBeta
+      // 说明这步非最佳走步也能至少保住“没被立即将死”的底线，也就是说：目前的最佳走步实际上并不是“唯一解”，还有其他存活路线
       if (Search2.bStop || vl >= vlBeta) {
-        return false;
+        return false; // 不是唯一着法，返回 false
       }
     }
   }
-  return true;
+  
+  // 只要没被打断，且上面循环里所有的备选走法评价得分全都不及格（全都低出了被将死的边界），
+  // 说明除最佳着法外，走其它任何步都会被将死。因此，之前的最佳走法是强迫性的“唯一解”
+  return true; // 是唯一着法，返回 true
 }
 
-// 主搜索例程
+// 主搜索例程，这是整个博弈树搜索的入口函数
+// 参数 nDepth 表示最大搜索深度
 void SearchMain(int nDepth) {
   int i, vl, vlLast, nDraw;
   int nCurrTimer, nLimitTimer, nLimitNodes;
@@ -680,93 +697,104 @@ void SearchMain(int nDepth) {
 #endif
   // 主搜索例程包括以下几个步骤：
 
-  // 1. 遇到和棋则直接返回
+  // 1. 提前判断：遇到和棋则直接返回
+  // 如果当前局面已经判定为和棋（例如长将、长捉、或者到达自然限着等），或者重复局面达到3次
   if (Search.pos.IsDraw() || Search.pos.RepStatus(3) > 0) {
 #ifndef CCHESS_A3800
-    printf("nobestmove\n");
+    printf("nobestmove\n");  // UCCI协议规定，无法产生着法时输出 nobestmove
     fflush(stdout);
 #endif
     return;    
   }
 
 #ifndef CCHESS_A3800
-  // 2. 从开局库中搜索着法
+  // 2. 从开局库中搜索着法 (如果配置允许使用开局库)
+  // 使用开局库可以极大节省开局阶段的时间，并且避免走出低级错误
   if (Search.bUseBook) {
-    // a. 获取开局库中的所有走法
+    // a. 获取开局库中当前局面的所有后续走法
     nBookMoves = GetBookMoves(Search.pos, Search.szBookFile, bks);
     if (nBookMoves > 0) {
       vl = 0;
+      // 遍历所有走法，累加权重(分数)，并向UI输出开局库的信息
       for (i = 0; i < nBookMoves; i ++) {
-        vl += bks[i].wvl;
+        vl += bks[i].wvl; // 累积权重
         dwMoveStr = MOVE_COORD(bks[i].wmv);
         printf("info depth 0 score %d pv %.4s\n", bks[i].wvl, (const char *) &dwMoveStr);
         fflush(stdout);
       }
-      // b. 根据权重随机选择一个走法
-      vl = Search.rc4Random.NextLong() % (uint32_t) vl;
+      // b. 轮盘赌算法：根据权重随机选择一个走法。权重越大的走法，被选中的概率越高。
+      vl = Search.rc4Random.NextLong() % (uint32_t) vl; // 在总权重内取一个随机数
       for (i = 0; i < nBookMoves; i ++) {
         vl -= bks[i].wvl;
         if (vl < 0) {
-          break;
+          break; // 随机落在了这个走法的区间内
         }
       }
       __ASSERT(vl < 0);
       __ASSERT(i < nBookMoves);
-      // c. 如果开局库中的着法够成循环局面，那么不走这个着法
+      
+      // c. 安全性检查：如果选择的开局库着法会导致循环局面(造成和棋或直接判负)，那么不走这个着法
       Search.pos.MakeMove(bks[i].wmv);
-      if (Search.pos.RepStatus(3) == 0) {
+      if (Search.pos.RepStatus(3) == 0) { // 确认走完之后没有构成循环
         dwMoveStr = MOVE_COORD(bks[i].wmv);
-        printf("bestmove %.4s", (const char *) &dwMoveStr);
-        // d. 给出后台思考的着法(开局库中第一个即权重最大的后续着法)
+        printf("bestmove %.4s", (const char *) &dwMoveStr); // 输出最佳走法
+        
+        // d. 给出后台思考(Ponder)的猜测着法：假设对手会走开局库中权重最大的下一步
         nBookMoves = GetBookMoves(Search.pos, Search.szBookFile, bks);
-        Search.pos.UndoMakeMove();
+        Search.pos.UndoMakeMove(); // 恢复局面
         if (nBookMoves > 0) {
           dwMoveStr = MOVE_COORD(bks[0].wmv);
           printf(" ponder %.4s", (const char *) &dwMoveStr);
         }
         printf("\n");
         fflush(stdout);
-        return;
+        return; // 从开局库中找到着法后直接返回，不进行耗时的深层搜索
       }
-      Search.pos.UndoMakeMove();
+      Search.pos.UndoMakeMove(); // 如果构成循环，则撤销测试走法，转为常规引擎搜索
     }
   }
 #endif
 
-  // 3. 如果深度为零则返回静态搜索值
+  // 3. 如果引擎要求深度为零（例如仅用来做快速的局面评估），则返回静态搜索（Quiescence Search）评价
   if (nDepth == 0) {
 #ifndef CCHESS_A3800
+    // 静态搜索会一直搜索直到局面平静（没有吃子威胁），避免水平线效应导致的错误评估
     printf("info depth 0 score %d\n", SearchQuiesc(Search.pos, -MATE_VALUE, MATE_VALUE));
     fflush(stdout);
-    printf("nobestmove\n");
+    printf("nobestmove\n"); // 深度0不产生真正的最佳着法输出
     fflush(stdout);
 #endif
     return;
   }
 
-  // 4. 生成根结点的每个着法
+  // 4. 生成根结点的所有合理着法
+  // 按照价值(如吃子价值)对第一层节点进行初步排序，并且过滤掉 UI 指定的禁止着法（BanMoves）
   Search2.MoveSort.InitRoot(Search.pos, Search.nBanMoves, Search.wmvBanList);
 
-  // 5. 初始化时间和计数器
+  // 5. 初始化搜索环境：清空相关标志、历史表、置换表和杀手着法
   Search2.bStop = Search2.bPonderStop = Search2.bPopPv = Search2.bPopCurrMove = false;
   Search2.nPopDepth = Search2.vlPopValue = 0;
   Search2.nAllNodes = Search2.nMainNodes = Search2.nUnchanged = 0;
   Search2.wmvPvLine[0] = 0;
-  ClearKiller(Search2.wmvKiller);
-  ClearHistory();
-  ClearHash();
-  // 由于 ClearHash() 需要消耗一定时间，所以计时从这以后开始比较合理
+  ClearKiller(Search2.wmvKiller); // 清空杀手着法（导致截断的优秀非吃子着法）
+  ClearHistory();                 // 清空历史表（用于着法排序的启发信息）
+  ClearHash();                    // 清空置换表（Transposition Table，用于存储已搜索局面，避免重复搜索）
+  
+  // 由于 ClearHash() 需要消耗一定时间，所以引擎计时从此后开始比较精确
   Search2.llTime = GetTime();
   vlLast = 0;
-  // 如果走了10回合无用着法，那么允许主动提和，以后每隔8回合提和一次
-  nDraw = -Search.pos.LastMove().CptDrw;
+  
+  // 60步（或特定步数）自然限着规则判断。如果走了很多回合没吃子，可以考虑主动提和
+  nDraw = -Search.pos.LastMove().CptDrw; 
   if (nDraw > 5 && ((nDraw - 4) / 2) % 8 == 0) {
-    Search.bDraw = true;
+    Search.bDraw = true; // 开启提和意图
   }
   bUnique = false;
   nCurrTimer = 0;
 
-  // 6. 做迭代加深搜索
+  // 6. 核心循环：迭代加深搜索 (Iterative Deepening)
+  // 不直接搜索目标深度，而是从深度1开始逐渐增加深度。
+  // 优点：1. 浅层搜索使得历史表、置换表和PV（主要变例）被预热，大幅提高深层搜索的剪枝效率。2. 方便时间管理，随时中断均有一步可用好棋。
   for (i = 1; i <= nDepth; i ++) {
     // 需要输出主要变例时，第一个"info depth n"是不输出的
 #ifndef CCHESS_A3800
@@ -775,56 +803,66 @@ void SearchMain(int nDepth) {
       fflush(stdout);
     }
 
-    // 7. 根据搜索的时间决定，是否需要输出主要变例和当前思考的着法
+    // 7. 根据搜索时间决定UI通讯：超过300ms偶尔输出PV(变例)，超3000ms输出正在考虑的根节点着法
     Search2.bPopPv = (nCurrTimer > 300);
     Search2.bPopCurrMove = (nCurrTimer > 3000);
 #endif
 
-    // 8. 搜索根结点
-    vl = SearchRoot(i);
+    // 8. 调用实际的搜索函数探索当前深度的博弈树
+    vl = SearchRoot(i); 
+    
+    // 如果在搜索中途被主线程（如时间到、用户命令停止）打断
     if (Search2.bStop) {
-      if (vl > -MATE_VALUE) {
-        vlLast = vl; // 跳出后，vlLast会用来判断认输或投降，所以需要给定最近一个值
+      if (vl > -MATE_VALUE) { // 确保vl有效
+        vlLast = vl; // 记录中断前获得的最可靠评估分，用于之后判断是否认输
       }
-      break; // 没有跳出，则"vl"是可靠值
+      break; // 结束迭代加深循环
     }
 
     nCurrTimer = (int) (GetTime() - Search2.llTime);
-    // 9. 如果搜索时间超过适当时限，则终止搜索
-    if (Search.nGoMode == GO_MODE_TIMER) {
-      // a. 如果没有使用空着裁剪，那么适当时限减半(因为分枝因子加倍了)
+    
+    // 9. 启发式时间管理机制 (Time Management)
+    // 根据具体引擎模式，动态判断是否要在此时截断搜索(提前停止)
+    if (Search.nGoMode == GO_MODE_TIMER) { // 按时间搜索模式
+      // a. 如果禁止了空步裁剪（Null Move Pruning），说明搜索树大，原本的适当时限需要减半
       nLimitTimer = (Search.bNullMove ? Search.nProperTimer : Search.nProperTimer / 2);
-      // b. 如果当前搜索值没有落后前一层很多，那么适当时限减半
+      
+      // b. 稳定性时间策略：如果当前搜索到的最佳分值相比上一层并未大幅恶化 (没掉入陷阱)，说明局面相对单纯，可以将时间限制减半提前返回；
+      // 反之，如果分值骤降，说明遇到了严重危机，需要保留全部的思考时间以期发现解法。
       nLimitTimer = (vl + DROPDOWN_VALUE >= vlLast ? nLimitTimer / 2 : nLimitTimer);
-      // c. 如果最佳着法连续多层没有变化，那么适当时限减半
+      
+      // c. 结果一致性判断：如果最佳着法连续多层(UNCHANGED_DEPTH)都没有变化，说明该走法已经非常稳定，无需再继续浪费时间，时限再次减半。
       nLimitTimer = (Search2.nUnchanged >= UNCHANGED_DEPTH ? nLimitTimer / 2 : nLimitTimer);
+      
+      // 时间超时判断
       if (nCurrTimer > nLimitTimer) {
         if (Search.bPonder) {
-          Search2.bPonderStop = true; // 如果处于后台思考模式，那么只是在后台思考命中后立即中止搜索。
+          Search2.bPonderStop = true; // 后台思考(Ponder)模式不会主动中断，而是在标志位置位后等真实“Hit”信号到来再停止
         } else {
           vlLast = vl;
-          break; // 不管是否跳出，"vlLast"都已更新
+          break; // 时间已经耗尽，且已完成当前深度的完整搜索，退出循环
         }
       }
-    } else if (Search.nGoMode == GO_MODE_NODES) {
-      // nLimitNodes的计算方法与nLimitTimer是一样的
+    } else if (Search.nGoMode == GO_MODE_NODES) { // 按节点数搜索模式 (常用于测试)
+      // 类似时间管理，启发式缩减允许的极限节点数
       nLimitNodes = (Search.bNullMove ? Search.nNodes : Search.nNodes / 2);
       nLimitNodes = (vl + DROPDOWN_VALUE >= vlLast ? nLimitNodes / 2 : nLimitNodes);
       nLimitNodes = (Search2.nUnchanged >= UNCHANGED_DEPTH ? nLimitNodes / 2 : nLimitNodes);
-      // GO_MODE_NODES下是不延长后台思考时间的
       if (Search2.nAllNodes > nLimitNodes) {
         vlLast = vl;
         break;
       }
     }
-    vlLast = vl;
+    vlLast = vl; // 将本层的得分保存，用于下一层迭代的时间管理比对
 
-    // 10. 搜索到杀棋则终止搜索
+    // 10. 绝杀提前返回：如果已经找到了将死对方或者必被将死的走法，无需继续加深搜索
     if (vlLast > WIN_VALUE || vlLast < -WIN_VALUE) {
       break;
     }
 
-    // 11. 是唯一着法，则终止搜索
+    // 11. 唯一着法启发 (Singular Move)检验：
+    // 测试当前最佳着法是不是“唯一选择”。如果除当前走法外，其他所有走法都会导致崩溃（被杀），
+    // 证明目前的选择是强迫性的，那就没必要为了计算其他劣势分支继续深搜。
     if (SearchUnique(1 - WIN_VALUE, i)) {
       bUnique = true;
       break;
@@ -832,11 +870,11 @@ void SearchMain(int nDepth) {
   }
 
 #ifdef CCHESS_A3800
-  Search.mvResult = Search2.wmvPvLine[0];
+  Search.mvResult = Search2.wmvPvLine[0]; // 轻量平台直接赋值结果
 #else
-  // 12. 输出最佳着法及其最佳应对(作为后台思考的猜测着法)
+  // 12. 搜索结束，输出 UCCI 协议标准结果：最佳着法(bestmove) 以及猜测的对手应法(ponder)
   if (Search2.wmvPvLine[0] != 0) {
-    PopPvLine();
+    PopPvLine(); // 打印最终的 pv 变例路径
     dwMoveStr = MOVE_COORD(Search2.wmvPvLine[0]);
     printf("bestmove %.4s", (const char *) &dwMoveStr);
     if (Search2.wmvPvLine[1] != 0) {
@@ -844,16 +882,17 @@ void SearchMain(int nDepth) {
       printf(" ponder %.4s", (const char *) &dwMoveStr);
     }
 
-    // 13. 判断是否认输或提和，但是经过唯一着法检验的不适合认输或提和(因为搜索深度不够)
+    // 13. AI辅助判断：认输(Resign)或提和(Draw)
+    // 注意：如果是“唯一着法”强制停止的，不能认输提和，因为可能并没有搜索得足够深
     if (!bUnique) {
       if (vlLast > -WIN_VALUE && vlLast < -RESIGN_VALUE) {
-        printf(" resign");
+        printf(" resign"); // 分值极低，被虐爆，发送认输指令
       } else if (Search.bDraw && !Search.pos.NullSafe() && vlLast < DRAW_OFFER_VALUE * 2) {
-        printf(" draw");
+        printf(" draw");   // 长期无进展且分数不高，发出提和意图
       }
     }
   } else {
-    printf("nobestmove");
+    printf("nobestmove"); // 没有找到合理的着法（可能已经被死棋）
   }
   printf("\n");
   fflush(stdout);

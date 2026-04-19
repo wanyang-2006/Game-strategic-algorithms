@@ -228,10 +228,10 @@ extern struct PreGenStruct {
 
 // 局面预评价结构
 extern struct PreEvalStruct {
-  bool bPromotion;
-  int vlAdvanced;
-  uint8_t ucvlWhitePieces[7][256];
-  uint8_t ucvlBlackPieces[7][256];
+  bool bPromotion;                      //“是否允许升变”
+  int vlAdvanced;                       //棋局进程附加分
+  uint8_t ucvlWhitePieces[7][256];      //红方7种棋子在棋盘256个坐标上的价值表
+  uint8_t ucvlBlackPieces[7][256];      //黑方7种棋子在棋盘256个坐标上的价值表
 } PreEval;
 
 void PreGenInit(void);

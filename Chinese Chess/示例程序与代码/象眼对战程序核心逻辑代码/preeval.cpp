@@ -347,67 +347,100 @@ void PositionStruct::PreEvaluate(void) {
   int i, sq, nMidgameValue, nWhiteAttacks, nBlackAttacks, nWhiteSimpleValue, nBlackSimpleValue;
   uint8_t ucvlPawnPiecesAttacking[256], ucvlPawnPiecesAttackless[256];
 
+  // 1. 初始化仅需进行一次的数据
   if (!bInit) {
     bInit = true;
     // 初始化"PreEvalEx.cPopCnt16"数组，只需要初始化一次
+    // 提前计算好所有的16位整数中的1的个数，用作快速查表，方便统计棋盘位图上的棋子数
     for (i = 0; i < 65536; i ++) {
       PreEvalEx.cPopCnt16[i] = PopCnt16(i);
     }
   }
 
-  // 首先判断局势处于开中局还是残局阶段，方法是计算各种棋子的数量，按照车=6、马炮=3、其它=1相加。
+  // 2. 根据全盘子力总价值，判断局势阶段（开中局 vs 残局）
+  // 首先判断局势处于开中局还是残局阶段，方法是计算各种棋子的数量，按照车=6、马炮=3、其它(士相兵)=1相加。
   nMidgameValue = PopCnt32(this->dwBitPiece & BOTH_BITPIECE(ADVISOR_BITPIECE | BISHOP_BITPIECE | PAWN_BITPIECE)) * OTHER_MIDGAME_VALUE;
   nMidgameValue += PopCnt32(this->dwBitPiece & BOTH_BITPIECE(KNIGHT_BITPIECE | CANNON_BITPIECE)) * KNIGHT_CANNON_MIDGAME_VALUE;
   nMidgameValue += PopCnt32(this->dwBitPiece & BOTH_BITPIECE(ROOK_BITPIECE)) * ROOK_MIDGAME_VALUE;
-  // 使用二次函数，子力很少时才认为接近残局
+  
+  // 使用二次函数平滑过渡，确保只有当子力很少时才认为接近残局。残局系数更大，导致中局和残局的分值界限更明确
   nMidgameValue = (2 * TOTAL_MIDGAME_VALUE - nMidgameValue) * nMidgameValue / TOTAL_MIDGAME_VALUE;
   __ASSERT_BOUND(0, nMidgameValue, TOTAL_MIDGAME_VALUE);
+  
+  // 计算最终的进度值 vlAdvanced 
   PreEval.vlAdvanced = (TOTAL_ADVANCED_VALUE * nMidgameValue + TOTAL_ADVANCED_VALUE / 2) / TOTAL_MIDGAME_VALUE;
   __ASSERT_BOUND(0, PreEval.vlAdvanced, TOTAL_ADVANCED_VALUE);
+  
+  // 3. 计算开中局和残局的权重叠加，获得棋子最终在各位置的精确分值
+  // 遍历棋盘的256个坐标
   for (sq = 0; sq < 256; sq ++) {
     if (IN_BOARD(sq)) {
-      PreEval.ucvlWhitePieces[0][sq] = PreEval.ucvlBlackPieces[0][SQUARE_FLIP(sq)] = (uint8_t)
+      // 兵/卒：按残局与中局的比重，加权平均计算它在这个位置的“进攻型”分值
+      ucvlPawnPiecesAttacking[sq] = (uint8_t)
           ((cucvlKingPawnMidgameAttacking[sq] * nMidgameValue + cucvlKingPawnEndgameAttacking[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
-      PreEval.ucvlWhitePieces[3][sq] = PreEval.ucvlBlackPieces[3][SQUARE_FLIP(sq)] = (uint8_t)
-          ((cucvlKnightMidgame[sq] * nMidgameValue + cucvlKnightEndgame[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
-      PreEval.ucvlWhitePieces[4][sq] = PreEval.ucvlBlackPieces[4][SQUARE_FLIP(sq)] = (uint8_t)
-          ((cucvlRookMidgame[sq] * nMidgameValue + cucvlRookEndgame[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
-      PreEval.ucvlWhitePieces[5][sq] = PreEval.ucvlBlackPieces[5][SQUARE_FLIP(sq)] = (uint8_t)
-          ((cucvlCannonMidgame[sq] * nMidgameValue + cucvlCannonEndgame[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
-      ucvlPawnPiecesAttacking[sq] = PreEval.ucvlWhitePieces[0][sq];
+      // 无攻击性兵/卒的分值
       ucvlPawnPiecesAttackless[sq] = (uint8_t)
           ((cucvlKingPawnMidgameAttackless[sq] * nMidgameValue + cucvlKingPawnEndgameAttackless[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
+
+      // 帅/将（索引0）的分值表生成
+      PreEval.ucvlWhitePieces[0][sq] = PreEval.ucvlBlackPieces[0][SQUARE_FLIP(sq)] = ucvlPawnPiecesAttacking[sq];
+      
+      // 马（索引3）的分值表生成：位置加权
+      PreEval.ucvlWhitePieces[3][sq] = PreEval.ucvlBlackPieces[3][SQUARE_FLIP(sq)] = (uint8_t)
+          ((cucvlKnightMidgame[sq] * nMidgameValue + cucvlKnightEndgame[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
+      
+      // 车（索引4）的分值表生成：位置加权
+      PreEval.ucvlWhitePieces[4][sq] = PreEval.ucvlBlackPieces[4][SQUARE_FLIP(sq)] = (uint8_t)
+          ((cucvlRookMidgame[sq] * nMidgameValue + cucvlRookEndgame[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
+      
+      // 炮（索引5）的分值表生成：位置加权
+      PreEval.ucvlWhitePieces[5][sq] = PreEval.ucvlBlackPieces[5][SQUARE_FLIP(sq)] = (uint8_t)
+          ((cucvlCannonMidgame[sq] * nMidgameValue + cucvlCannonEndgame[sq] * (TOTAL_MIDGAME_VALUE - nMidgameValue)) / TOTAL_MIDGAME_VALUE);
     }
   }
+  
+  // 4. 计算特殊棋型（空头炮、窝心马）带来的威胁分值
   for (i = 0; i < 16; i ++) {
+    // 空头炮在残局阶段威胁减小，需调整
     PreEvalEx.vlHollowThreat[i] = cvlHollowThreat[i] * (nMidgameValue + TOTAL_MIDGAME_VALUE) / (TOTAL_MIDGAME_VALUE * 2);
     __ASSERT_BOUND(0, PreEvalEx.vlHollowThreat[i], cvlHollowThreat[i]);
+    // 炮镇窝心马的威胁不随阶段显著变化
     PreEvalEx.vlCentralThreat[i] = cvlCentralThreat[i];
   }
 
+  // 5. 进攻度分析：判断各方对红/黑形成的实质威胁
   // 然后判断各方是否处于进攻状态，方法是计算各种过河棋子的数量，按照车马2炮兵1相加。
   nWhiteAttacks = nBlackAttacks = 0;
+  
+  // 统计红方的过河马、车（权重为2）
   for (i = SIDE_TAG(0) + KNIGHT_FROM; i <= SIDE_TAG(0) + ROOK_TO; i ++) {
     if (this->ucsqPieces[i] != 0 && BLACK_HALF(this->ucsqPieces[i])) {
       nWhiteAttacks += 2;
     }
   }
+  // 统计红方的过河炮、兵（权重为1）
   for (i = SIDE_TAG(0) + CANNON_FROM; i <= SIDE_TAG(0) + PAWN_TO; i ++) {
     if (this->ucsqPieces[i] != 0 && BLACK_HALF(this->ucsqPieces[i])) {
       nWhiteAttacks ++;
     }
   }
+  
+  // 统计黑方的过河马、车（权重为2）
   for (i = SIDE_TAG(1) + KNIGHT_FROM; i <= SIDE_TAG(1) + ROOK_TO; i ++) {
     if (this->ucsqPieces[i] != 0 && WHITE_HALF(this->ucsqPieces[i])) {
       nBlackAttacks += 2;
     }
   }
+  // 统计黑方的过河炮、卒（权重为1）
   for (i = SIDE_TAG(1) + CANNON_FROM; i <= SIDE_TAG(1) + PAWN_TO; i ++) {
     if (this->ucsqPieces[i] != 0 && WHITE_HALF(this->ucsqPieces[i])) {
       nBlackAttacks ++;
     }
   }
-  // 如果本方轻子数比对方多，那么每多一个轻子(车算2个轻子)威胁值加2。威胁值最多不超过8。
+  
+  // 6. 追加“大子碾压”的隐性威胁值
+  // 如果本方大子(车马炮)数量比对方多，那么每多一个轻子(车算2个轻子)威胁值加2。威胁值最多不超过8。
+  // PopCnt16能计算出当前位图(wBitPiece)上有多少个1，从而知道棋子存活个数
   nWhiteSimpleValue = PopCnt16(this->wBitPiece[0] & ROOK_BITPIECE) * 2 + PopCnt16(this->wBitPiece[0] & (KNIGHT_BITPIECE | CANNON_BITPIECE));
   nBlackSimpleValue = PopCnt16(this->wBitPiece[1] & ROOK_BITPIECE) * 2 + PopCnt16(this->wBitPiece[1] & (KNIGHT_BITPIECE | CANNON_BITPIECE));
   if (nWhiteSimpleValue > nBlackSimpleValue) {
@@ -415,32 +448,45 @@ void PositionStruct::PreEvaluate(void) {
   } else {
     nBlackAttacks += (nBlackSimpleValue - nWhiteSimpleValue) * 2;
   }
+  
+  // 将进攻度限制在最大值以内
   nWhiteAttacks = MIN(nWhiteAttacks, TOTAL_ATTACK_VALUE);
   nBlackAttacks = MIN(nBlackAttacks, TOTAL_ATTACK_VALUE);
+  
+  // 漏风度计算（漏风 = 对方攻势使得本方士象防线出现的隐患）
   PreEvalEx.vlBlackAdvisorLeakage = TOTAL_ADVISOR_LEAKAGE * nWhiteAttacks / TOTAL_ATTACK_VALUE;
   PreEvalEx.vlWhiteAdvisorLeakage = TOTAL_ADVISOR_LEAKAGE * nBlackAttacks / TOTAL_ATTACK_VALUE;
   __ASSERT_BOUND(0, nWhiteAttacks, TOTAL_ATTACK_VALUE);
   __ASSERT_BOUND(0, nBlackAttacks, TOTAL_ATTACK_VALUE);
   __ASSERT_BOUND(0, PreEvalEx.vlBlackAdvisorLeakage, TOTAL_ADVISOR_LEAKAGE);
   __ASSERT_BOUND(0, PreEvalEx.vlBlackAdvisorLeakage, TOTAL_ADVISOR_LEAKAGE);
+  
+  // 7. 防御子力（士、相）以及兵/卒位置的动态最终赋值
+  // 核心思想：士相的位置好坏，取决于对方进攻猛烈程度。如果对方毫无攻势，士相缩在家里和在外边几乎没有分值差；反之则差距极大
   for (sq = 0; sq < 256; sq ++) {
     if (IN_BOARD(sq)) {
+      // 红方 士(1) 相(2) 的最终位置分
       PreEval.ucvlWhitePieces[1][sq] = PreEval.ucvlWhitePieces[2][sq] = (uint8_t) ((cucvlAdvisorBishopThreatened[sq] * nBlackAttacks +
           (PreEval.bPromotion ? cucvlAdvisorBishopPromotionThreatless[sq] : cucvlAdvisorBishopThreatless[sq]) * (TOTAL_ATTACK_VALUE - nBlackAttacks)) / TOTAL_ATTACK_VALUE);
+      // 黑方 士(1) 相(2) 的最终位置分
       PreEval.ucvlBlackPieces[1][sq] = PreEval.ucvlBlackPieces[2][sq] = (uint8_t) ((cucvlAdvisorBishopThreatened[SQUARE_FLIP(sq)] * nWhiteAttacks +
           (PreEval.bPromotion ? cucvlAdvisorBishopPromotionThreatless[SQUARE_FLIP(sq)] : cucvlAdvisorBishopThreatless[SQUARE_FLIP(sq)]) * (TOTAL_ATTACK_VALUE - nWhiteAttacks)) / TOTAL_ATTACK_VALUE);
+      // 红方 兵(6) 的综合攻击性分值绑定
       PreEval.ucvlWhitePieces[6][sq] = (uint8_t) ((ucvlPawnPiecesAttacking[sq] * nWhiteAttacks +
           ucvlPawnPiecesAttackless[sq] * (TOTAL_ATTACK_VALUE - nWhiteAttacks)) / TOTAL_ATTACK_VALUE);
+      // 黑方 卒(6) 的综合攻击性分值绑定
       PreEval.ucvlBlackPieces[6][sq] = (uint8_t) ((ucvlPawnPiecesAttacking[SQUARE_FLIP(sq)] * nBlackAttacks +
           ucvlPawnPiecesAttackless[SQUARE_FLIP(sq)] * (TOTAL_ATTACK_VALUE - nBlackAttacks)) / TOTAL_ATTACK_VALUE);
     }
   }
+  
+  // 8. 沉底炮的威胁程度：对方进攻度越高，沉底炮的杀伤性效果就被放大
   for (i = 0; i < 16; i ++) {
     PreEvalEx.vlWhiteBottomThreat[i] = cvlBottomThreat[i] * nBlackAttacks / TOTAL_ATTACK_VALUE;
     PreEvalEx.vlBlackBottomThreat[i] = cvlBottomThreat[i] * nWhiteAttacks / TOTAL_ATTACK_VALUE;
   }
 
-  // 检查预评价是否对称
+  // 检查预评价是否对称 (Debug 模式才会执行)
 #ifndef NDEBUG
   for (sq = 0; sq < 256; sq ++) {
     if (IN_BOARD(sq)) {
@@ -450,28 +496,35 @@ void PositionStruct::PreEvaluate(void) {
       }
     }
   }
+  // 检查左右对称性
   for (i = FILE_LEFT; i <= FILE_RIGHT; i ++) {
     __ASSERT(PreEvalEx.vlWhiteBottomThreat[i] == PreEvalEx.vlWhiteBottomThreat[FILE_FLIP(i)]);
     __ASSERT(PreEvalEx.vlBlackBottomThreat[i] == PreEvalEx.vlBlackBottomThreat[FILE_FLIP(i)]);
   }
 #endif
 
-  // 调整不受威胁方少掉的仕(士)相(象)分值
+  // 9. 调整不受威胁方少掉的仕(士)相(象)分值
+  // 默认情况下如果无威胁，少一个相也问题不大；如果有极大威胁，少的相就会严重变成负分
   this->vlWhite = ADVISOR_BISHOP_ATTACKLESS_VALUE * (TOTAL_ATTACK_VALUE - nBlackAttacks) / TOTAL_ATTACK_VALUE;
   this->vlBlack = ADVISOR_BISHOP_ATTACKLESS_VALUE * (TOTAL_ATTACK_VALUE - nWhiteAttacks) / TOTAL_ATTACK_VALUE;
+  
   // 如果允许升变，那么不受威胁的仕(士)相(象)分值就少了一半
   if (PreEval.bPromotion) {
     this->vlWhite /= 2;
     this->vlBlack /= 2;
   }
-  // 最后重新计算子力位置分
+  
+  // 10. 最后一击：将上面算好的每个棋子在其存活位置的单独得分，累加到一方的总分 (vlWhite / vlBlack) 中
+  // 红方子力从索引16到31
   for (i = 16; i < 32; i ++) {
     sq = this->ucsqPieces[i];
-    if (sq != 0) {
+    if (sq != 0) { // 如果这枚棋子还在棋盘上
       __ASSERT_SQUARE(sq);
+      // 把刚才初始化好的基础位置加权数组中该走法对应的值，累加到白方红方基础分上
       this->vlWhite += PreEval.ucvlWhitePieces[PIECE_TYPE(i)][sq];
     }
   }
+  // 黑方子力从索引32到47
   for (i = 32; i < 48; i ++) {
     sq = this->ucsqPieces[i];
     if (sq != 0) {

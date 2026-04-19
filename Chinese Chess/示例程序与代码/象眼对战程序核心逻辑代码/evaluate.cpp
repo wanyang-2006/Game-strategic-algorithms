@@ -576,7 +576,16 @@ int PositionStruct::Evaluate(int vlAlpha, int vlBeta) const {
   // 偷懒的局面评价函数分以下几个层次：
 
   // 1. 四级偷懒评价(彻底偷懒评价)，只包括子力平衡；
+  // 答疑解惑：这里其实【已经包含了 preeval.cpp】中算出的全部估值！
+  // this->Material() 会返回 this->vlWhite - this->vlBlack。
+  // 而 vlWhite 和 vlBlack 正是在 preeval.cpp 中的 PreEvaluate() 函数里，
+  // 遍历棋盘并将每个棋子的"基础面值"和"位置加权附加分"累加得到的底分。
+  // 同时，这个底分在 MakeMove()/UndoMakeMove() 时是增量维护的，极其高效。
   vl = this->Material();
+  
+  // 偷懒剪枝（Lazy Evaluation）：
+  // 如果基础分已经大幅超过或低于边界（偏离度达到 EVAL_MARGIN1，即 160分），说明胜负已分，
+  // 就没必要进行后面极其耗时的动态特征(牵制、特殊阵型)判断了，直接返回。
   if (vl + EVAL_MARGIN1 <= vlAlpha) {
     return vl + EVAL_MARGIN1;
   } else if (vl - EVAL_MARGIN1 >= vlBeta) {
