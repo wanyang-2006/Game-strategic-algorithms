@@ -104,6 +104,7 @@ struct Move
     }
 }; // 描述一步行棋（起点和终点坐标）的数据结构
 
+//？？？如何再考虑使用？
 // MoveNode，根据当前的着棋算出相应的收益，同时可增添其它的数据属性 博弈树上的局面应当是局面节点构成的树，根据局面做估值
 //数学理论上，是根据状态构建博弈树，实际上使用着法节点构成博弈树 —— 避免程序过大的开销
 struct MoveNode
@@ -201,8 +202,9 @@ public:
     bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
     int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分
     int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
-    int calstate_val(vector<Grid> &target,colorType color);    //静态 + 动态得分
+    int calstate(vector<Grid>& target,colorType color);        //计算出当前局面的总得分
     void getGridcontrol();                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
+    int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
@@ -1881,8 +1883,8 @@ const int EnemyKingArea = 8;  //敌方九宫区域 ———— 最为重要，�
 const int EnemyHalf = 5; 
 const int OwnHalf = 2;        //我方半场
 const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
-const int attackweight;       //或使用double，进攻权重
-const int defenceweight;      //或使用double，防御权重
+const int attackweight = 1;       //或使用double，进攻权重
+const int defenceweight = 1;      //或使用double，防御权重
 int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
     //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
     int myattack = 0,myDefense = 0; 
@@ -1935,6 +1937,56 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
     int res = attackweight * (myattack - oppattack) + defenceweight * (myDefense - oppDefence);
     return res;
 }
+
+//静态评估系数(暂时采用int)、动态评估系数(暂时采用int)
+const int mystaticweight = 1;
+const int mydynamicweight = 1;
+const int oppstaticweight = 1;
+const int oppdynamicweight = 1;
+
+//集成局面总评估方法(后续进行补充)
+int EvalRecord::calstate(vector<Grid>& target,colorType color){
+
+    int res = 0;
+    res += this->calstaticstate(target,color);
+    res += this->caldynamicstate(target,color);
+    return res;
+}
+
+//评估单步着法的估值，可能不只是预估我方的某个着法
+int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
+    //求delta值，现在的评分 —— 先前的评分
+    //评价方为Move所属的着棋一方，着棋一方使用"my...",对方使用"opp..."
+    assert(curstate[board->xy2pos(cur.source_x,cur.source_y)].color == color);
+    
+    int mypreval = 0,mycurval = 0;
+    int opppreval = 0,oppcurval = 0;
+    colorType oppcol = (color == RED) ? BLACK : RED;
+
+    mypreval = calstate(curstate,color);
+    opppreval = calstate(curstate,oppcol);
+
+    //不可以修改curstate！拷贝或者使用回撤，但一旦Grid某处被覆盖掉，则不知道覆盖之前的值
+    auto copyst = curstate;
+    
+    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
+    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
+
+    //更新临时对象copyst
+    copyst[source_pos].color = EMPTY;
+    copyst[source_pos].type = None;  // 吃子/移动不仅要变空颜色，连棋子类型也要抹去
+    copyst[target_pos].color = color;
+    copyst[target_pos].type = curstate[source_pos].type;   // 赋予新走到这里的棋子类型
+
+    mycurval = calstate(copyst,color);
+    oppcurval = calstate(copyst,oppcol);
+
+    //自身增量减去对方增量
+    return (mycurval - mypreval) - (oppcurval - opppreval);
+}
+//根据当前对于局面的评分函数，针对当前的Move进行评分
+
+
 
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
