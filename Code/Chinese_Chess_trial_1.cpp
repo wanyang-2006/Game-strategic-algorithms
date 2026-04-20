@@ -187,7 +187,9 @@ public:
 class EvalRecord{
 public:
     Chess *board; //评估类含有的Chess指针，用于调用Chess中的方法
-    void bindBoard(Chess *currentBoard) { board = currentBoard; }
+    void copyBoard(Chess *currentBoard) { board = currentBoard; } //
+
+    int GridControl[2][90];  //红 / 黑方在9*10棋盘上控制的 点数(红:0 黑:1)
 
     bool isKingattacked;
     vector<Grid> curstones;
@@ -199,7 +201,7 @@ public:
     int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分                    //根据当前局面，给出静态局面得分
     int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
     int calstate_val(vector<Grid> &target,colorType color);    //静态 + 动态得分
-
+    void getGridcontrol();                                     //填充控制点字典
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
@@ -1313,7 +1315,7 @@ void ChessAI::getdiffmoves()
 ChessAI::ChessAI()
 {
     this->board = new Chess();
-    this->evaluator.bindBoard(this->board);
+    this->evaluator.copyBoard(this->board);
 
     //初始化其它成员变量
     evaluator.isKingattacked = false;
@@ -1496,6 +1498,165 @@ static const int end_Cannon[90] = {
    100,100,100,104,106,104,100,100,100,
    100,100,100,104,106,104,100,100,100,
 };
+
+void EvalRecord::getGridcontrol(){
+    if(board == nullptr){
+        throw std::runtime_error("EvalRecord::board is null");
+    }
+
+    //每次使用前都重新清空控制点字典
+    for(int side = 0; side < 2; side ++){
+        for(int pos = 0; pos < 90; pos ++){
+            GridControl[side][pos] = 0;
+        }
+    }
+
+    int tmp = board->currTurnId;
+    for(int y = 0; y < BOARDHEIGHT; y ++){
+        for(int x = 0; x < BOARDWIDTH; x ++){
+            auto &curGrid = board->state[tmp][board->xy2pos(x, y)];
+            if(curGrid.color == EMPTY){
+                continue;
+            }
+
+            //按照约定：红色映射到0，黑色映射到1
+            int colorId = (curGrid.color == RED ? 0 : 1);
+
+            switch (curGrid.type)
+            {
+            case None:
+                break;
+            case King:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
+                    if(!board->inKingArea(tx, ty, curGrid.color)){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                }
+                //将帅照面：King沿竖线遇到对方King时，同样计为可控制
+                for(int dir = -1; dir <= 1; dir += 2){
+                    int ty = y + dir;
+                    while(board->inBoard(x, ty)){
+                        auto &tGrid = board->state[tmp][board->xy2pos(x, ty)];
+                        if(tGrid.color != EMPTY){
+                            if(tGrid.type == King && tGrid.color != curGrid.color){
+                                GridControl[colorId][board->xy2pos(x, ty)] ++;
+                            }
+                            break;
+                        }
+                        ty += dir;
+                    }
+                }
+                break;
+            }
+            case Assistant:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_ob[dir], ty = y + dy_ob[dir];
+                    if(!board->inKingArea(tx, ty, curGrid.color)){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                }
+                break;
+            }
+            case Bishop:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_bishop[dir], ty = y + dy_bishop[dir];
+                    if(!board->inBoard(tx, ty) || !board->inColorArea(tx, ty, curGrid.color)){
+                        continue;
+                    }
+                    int ex = x + dx_bishop_eye[dir], ey = y + dy_bishop_eye[dir];
+                    auto &eGrid = board->state[tmp][board->xy2pos(ex, ey)];
+                    if(eGrid.color != EMPTY){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                }
+                break;
+            }
+            case Knight:
+            {
+                for(int dir = 0; dir < 8; dir ++){
+                    int tx = x + dx_knight[dir], ty = y + dy_knight[dir];
+                    if(!board->inBoard(tx, ty)){
+                        continue;
+                    }
+                    int fx = x + dx_knight_foot[dir], fy = y + dy_knight_foot[dir];
+                    auto &fGrid = board->state[tmp][board->xy2pos(fx, fy)];
+                    if(fGrid.color != EMPTY){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                }
+                break;
+            }
+            case Rook:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
+                    while(board->inBoard(tx, ty)){
+                        GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                        auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(tGrid.color != EMPTY){
+                            break;
+                        }
+                        tx += dx_strai[dir];
+                        ty += dy_strai[dir];
+                    }
+                }
+                break;
+            }
+            case Cannon:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
+                    bool hasScreen = false;
+                    while(board->inBoard(tx, ty)){
+                        auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(!hasScreen){
+                            if(tGrid.color == EMPTY){
+                                GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                            }else{
+                                hasScreen = true;
+                            }
+                        }else{
+                            if(tGrid.color != EMPTY){
+                                GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                                break;
+                            }
+                        }
+                        tx += dx_strai[dir];
+                        ty += dy_strai[dir];
+                    }
+                }
+                break;
+            }
+            case Pawn:
+            {
+                int forwardOne = (curGrid.color == RED ? 1 : -1);
+                int tx = x, ty = y + forwardOne;
+                if(board->inBoard(tx, ty)){
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                }
+                bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
+                if(crossMidLine){
+                    for(int dir = 0; dir < 2; dir ++){
+                        tx = x + dx_lr[dir], ty = y;
+                        if(board->inBoard(tx, ty)){
+                            GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                        }
+                    }
+                }
+                break;
+            }
+            }
+        }
+    }
+}
 
 bool EvalRecord::hasattackchance(int mx,int my){
     //使用targetControl数组————该点由谁控制?
