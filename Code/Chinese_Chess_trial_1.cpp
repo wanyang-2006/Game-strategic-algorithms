@@ -140,6 +140,7 @@ struct Grid
 class Chess
 {
     friend class ChessAI; // ChessAI拥有调用Chess所有方法和属性的权限！
+    friend class EvalRecord; 
 private:
     std::vector<std::vector<Grid>> state;
     int currTurnId;
@@ -182,29 +183,45 @@ public:
     bool isattacked(colorType color, int mx, int my);
 };
 
-//产生策略类
+//局面评估类 包含评估的各个指标量(特征提取)和评估方法 
+class EvalRecord{
+public:
+    Chess *board; //评估类含有的Chess指针，用于调用Chess中的方法
+    void bindBoard(Chess *currentBoard) { board = currentBoard; }
 
-// ChessAI的构造函数？
+    bool isKingattacked;
+    vector<Grid> curstones;
+    vector<bool> curattacked;
+    
+    bool isattacked(colorType color, int mx, int my);          //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
+    bool hasattackchance(int mx,int my);                       //当前位于x y处的棋子是否有吃子的可能
+    bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
+    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分                    //根据当前局面，给出静态局面得分
+    int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
+    int calstate_val(vector<Grid> &target,colorType color);    //静态 + 动态得分
+
+    EvalRecord() : board(nullptr), isKingattacked(false) {}
+};
+
+//产生策略类
 class ChessAI
 {
 public:
-    // ChessAI属性
+    // ChessAI属性 —— 由棋局状态 、 评估结构体组成
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
+    EvalRecord evaluator; // 独立负责局面打分的评估器实例
 
-    bool isKingattacked;        //己方将/帅是否被 将军
-    vector<Grid> curstones;     //储存现有 各个棋子状态
-    vector<bool> curattacked;   //我方的棋子是否被吃
     vector<Move> curlegalmoves; //由chess产生，当前合法的状态
     vector<Move> eatenmoves;    //"死手"——产生吃子的着棋
     vector<Move> plainmoves;    //"白手"——不产生吃子的着棋
 
+    vector<Move> selected;      //经过估值和搜素，最终得到的最佳移动策略
+
     // ChessAI方法
     void getcurstones(void);
-    bool isattacked(colorType color, int mx, int my);          //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
     void generateMovesWithForbidden();                         //对应board的同名方法
     void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
-    bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
-    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前局面静态评分                    //根据当前局面，给出静态局面得分
+    int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
 
     ChessAI();
     ~ChessAI();
@@ -1133,8 +1150,8 @@ void ChessAI::getcurstones()
         {
             if (board->state[tmp][board->xy2pos(x, y)].color == Color)
             {
-                curstones.push_back(board->state[tmp][board->xy2pos(x, y)]); // ChessAI中的curstones容器
-                curattacked.push_back(isattacked(board->oppColor(), x, y));  // ChessAI中的curattacked容器
+                evaluator.curstones.push_back(board->state[tmp][board->xy2pos(x, y)]); 
+                evaluator.curattacked.push_back(evaluator.isattacked(board->oppColor(), x, y));  
             }
         }
     }
@@ -1255,7 +1272,7 @@ bool Chess::isattacked(colorType color, int mx, int my)
 }
 
 //传入对方的颜色 我方棋子的位置，验证对方是否能攻击到我方棋子
-bool ChessAI::isattacked(colorType color, int mx, int my)
+bool EvalRecord::isattacked(colorType color, int mx, int my)
 {
     if (color == board->currColor)
     {
@@ -1274,7 +1291,7 @@ bool ChessAI::isattacked(colorType color, int mx, int my)
 
 void ChessAI::generateMovesWithForbidden()
 {
-    board->generateMovesWithForbidden(this->curlegalmoves, this->isKingattacked);
+    board->generateMovesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
     //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
 }
 
@@ -1296,9 +1313,10 @@ void ChessAI::getdiffmoves()
 ChessAI::ChessAI()
 {
     this->board = new Chess();
+    this->evaluator.bindBoard(this->board);
 
     //初始化其它成员变量
-    isKingattacked = false;
+    evaluator.isKingattacked = false;
 }
 
 ChessAI::~ChessAI()
@@ -1311,36 +1329,9 @@ ChessAI::~ChessAI()
     }
 }
 
-//中局进攻的将帅和兵
+
+//中局有进攻机会的兵 / 帅
 static const int mid_KingPawn_attack[90] = {
-    9, 9, 9, 11, 13, 11, 9, 9, 9,
-    39, 49, 69, 84, 89, 84, 69, 49, 39,
-    39, 49, 64, 74, 74, 74, 64, 49, 39,
-    39, 46, 54, 59, 61, 59, 54, 46, 39,
-    29, 37, 41, 54, 59, 54, 41, 37, 29,
-    7, 0, 13, 0, 16, 0, 13, 0, 7,
-    7, 0, 7, 0, 15, 0, 7, 0, 7,
-    0, 0, 0, 1, 1, 1, 0, 0, 0,
-    0, 0, 0, 2, 2, 2, 0, 0, 0,
-    0, 0, 0, 11, 15, 11, 0, 0, 0,
-};
-
-//中局不进攻的将帅和兵
-static const int mid_KingPawn_no_attack[90] = {
-    9,  9,  9, 11, 13, 11,  9,  9,  9, 
-    19, 24, 34, 42, 44, 42, 34, 24, 19,  
-    19, 24, 32, 37, 37, 37, 32, 24, 19,  
-    9, 23, 27, 29, 30, 29, 27, 23, 19,
-    14, 18, 20, 27, 29, 27, 20, 18, 14,  
-    7,  0, 13,  0, 16,  0, 13,  0,  7, 
-    7,  0,  7,  0, 15,  0,  7,  0,  7,  
-    0,  0,  0,  1,  1,  1,  0,  0,  0,  
-    0,  0,  0,  2,  2,  2,  0,  0,  0, 
-    0,  0,  0, 11, 15, 11,  0,  0,  0, 
-};
-
-//中局被威胁的将帅和兵
-static const int end_KingPawn_attack[90] = {
     10, 10, 10, 15, 15, 15, 10, 10, 10,
     50, 55, 60, 85,100, 85, 60, 55, 50,
     65, 70, 70, 75, 75, 75, 70, 70, 65,
@@ -1353,8 +1344,8 @@ static const int end_KingPawn_attack[90] = {
      0,  0,  1,  1, 11,  1,  1,  0,  0,
 };
 
-//中局不被威胁的将帅和兵
-static const int end_KingPawn_no_attack[90] = {
+//中局无进攻机会的兵 / 帅
+static const int mid_KingPawn_no_attack[90] = {
     10, 10, 10, 15, 15, 15, 10, 10, 10,  
     10, 15, 20, 45, 60, 45, 20, 15, 10, 
     25, 30, 30, 35, 35, 35, 30, 30, 25,  
@@ -1366,8 +1357,35 @@ static const int end_KingPawn_no_attack[90] = {
     0,  0,  3,  3, 12,  3,  3,  0,  0, 
     0,  0,  1,  1, 11,  1,  1,  0,  0,
 };
+//残局有进攻机会的兵 / 帅
+static const int end_KingPawn_attack[90] = {
 
-//中局无威胁的士和象
+    10, 10, 10, 15, 15, 15, 10, 10, 10, 
+    50, 55, 60, 85,100, 85, 60, 55, 50, 
+    65, 70, 70, 75, 75, 75, 70, 70, 65, 
+    75, 80, 80, 80, 80, 80, 80, 80, 75, 
+    70, 70, 65, 70, 70, 70, 65, 70, 70,
+    45,  0, 40, 45, 45, 45, 40,  0, 45,
+    40,  0, 35, 40, 40, 40, 35,  0, 40,
+    0,  0,  5,  5, 15,  5,  5,  0,  0,
+    0,  0,  3,  3, 13,  3,  3,  0,  0,
+    0,  0,  1,  1, 11,  1,  1,  0,  0, 
+};
+
+//残局无进攻机会的兵 / 帅
+static const int end_KingPawn_no_attack[90] = {
+    10, 10, 10, 15, 15, 15, 10, 10, 10, 
+    10, 15, 20, 45, 60, 45, 20, 15, 10,
+    25, 30, 30, 35, 35, 35, 30, 30, 25, 
+    35, 40, 40, 45, 45, 45, 40, 40, 35, 
+    25, 30, 30, 35, 35, 35, 30, 30, 25, 
+    25,  0, 25, 25, 25, 25, 25,  0, 25, 
+    20,  0, 20, 20, 20, 20, 20,  0, 20, 
+    0,  0,  5,  5, 13,  5,  5,  0,  0, 
+    0,  0,  3,  3, 12,  3,  3,  0,  0,  
+    0,  0,  1,  1, 11,  1,  1,  0,  0,
+};
+//有威胁的士和象
 static const int mid_AdvBis_no_Threat[90] = {
      0,  0,  0,  0,  0,  0,  0,  0,  0,
      0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -1381,7 +1399,7 @@ static const int mid_AdvBis_no_Threat[90] = {
      0,  0, 20, 20,  0, 20, 20,  0,  0,
 };
 
-//中局有威胁的士和象
+//有威胁的士和象
 static const int mid_AdvBis_Threat[90] = {
      0,  0,  0,  0,  0,  0,  0,  0,  0,
      0,  0,  0,  0,  0,  0,  0,  0,  0,
@@ -1479,13 +1497,19 @@ static const int end_Cannon[90] = {
    100,100,100,104,106,104,100,100,100,
 };
 
+bool EvalRecord::hasattackchance(int mx,int my){
+    //使用targetControl数组————该点由谁控制?
+    //依靠board->generateMoves
+    return false; // 需按照具体上下文重构
+}
+
 //当前是否为中局：车 6 马炮 3 其它 1
 const int Rook_state = 6;
 const int HorseCannon_state = 3;
 const int other_state = 1;
 const int Total_state = 66;
 //判断当前是否为中局 
-bool ChessAI::ismiddlecompostion(vector<Grid>& vec){
+bool EvalRecord::ismiddlecompostion(vector<Grid>& vec){
     int tmp = 0;
     for(int y = 9; y >= 0;y --){
         for(int x = 0;x <= 8;x ++){
@@ -1501,13 +1525,160 @@ bool ChessAI::ismiddlecompostion(vector<Grid>& vec){
     return tmp > (Total_state / 2);
 }
 
-//注意：静态棋力表中的数据均为对红方而言的数据，颜色不同时需要翻转————(9 - x,10 - y))
+//注意：静态棋力表中的数据均为对红方而言的数据，颜色不同时，需要翻转————(9 - x,10 - y)
 //参考Eleeye中的静态估值 vec调用board->state中的当前状态
-int ChessAI::calstaticstate(vector<Grid> &vec, colorType color)
+int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
 {
-    
+    bool ismiddle = ismiddlecompostion(vec);
+    //判断color:红色和黑色的静态表对称
+
+    int res = 0;
+
+    //红方 中局
+    //(x,y) -> (9*(9 - y) + x + 1 = 82 - 9 * y + x)
+    if(color == RED && ismiddle){
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? mid_KingPawn_attack[82 - 9 * y + x] : mid_KingPawn_no_attack[82 - 9 * y  + x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_Threat[82 - 9 * y + x] : mid_AdvBis_no_Threat[82 - 9 * y + x];
+                    break;
+                }
+                case Knight:
+                    res += mid_horse[82 - 9 * y + x];
+                case Rook:
+                    res += mid_Rook[82 - 9 * y + x];
+                case Cannon:
+                    res += mid_Cannon[82 - 9 * y + x];
+                default:
+                    break;
+                }
+            }
+        }
+    }else if(color == RED && !ismiddle){ //红色 残局
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? end_KingPawn_attack[82 - 9 * y + x] : end_KingPawn_no_attack[82 - 9 * y  + x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_Threat[82 - 9 * y + x] : mid_AdvBis_no_Threat[82 - 9 * y + x];
+                    break;
+                }
+                case Knight:
+                    res += end_horse[82 - 9 * y + x];
+                case Rook:
+                    res += end_Rook[82 - 9 * y + x];
+                case Cannon:
+                    res += end_Cannon[82 - 9 * y + x];
+                default:
+                    break;
+                }
+            }
+        }if(color == BLACK && ismiddle){
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? mid_KingPawn_attack[9 + 9 * y - x] : mid_KingPawn_no_attack[9 + 9 * y - x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_Threat[9 + 9 * y - x] : mid_AdvBis_no_Threat[9 + 9 * y - x];
+                    break;
+                }
+                case Knight:
+                    res += mid_horse[9 + 9 * y - x];
+                case Rook:
+                    res += mid_Rook[9 + 9 * y - x];
+                case Cannon:
+                    res += mid_Cannon[9 + 9 * y - x];
+                default:
+                    break;
+                    }
+                }
+            }
+        }else{ //color == BLACK && !ismiddle
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? end_KingPawn_attack[9 + 9 * y - x] : end_KingPawn_no_attack[9 + 9 * y - x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_no_Threat[9 + 9 * y - x] : mid_AdvBis_no_Threat[9 + 9 * y - x];
+                    break;
+                }
+                case Knight:
+                    res += end_horse[9 + 9 * y - x];
+                case Rook:
+                    res += end_Rook[9 + 9 * y - x];
+                case Cannon:
+                    res += end_Cannon[9 + 9 * y - x];
+                default:
+                    break;
+                    }
+                }
+            }
+        }
+    }
+
+    return res;
 }
-//判断此次下子是否吃子
+
+//借鉴eleeye中的一系列动态得分机制
+
+//1.特殊棋型 空头炮 / 窝心马
+//2.进攻度分析
+//3.防御度分析
+
+
+
+
+//判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
 //非吃子的估值
 
@@ -1520,3 +1691,5 @@ int ChessAI::calstaticstate(vector<Grid> &vec, colorType color)
     //     }
     //     std::cout << std::endl;
     // }
+
+//使用PSW进行搜索 —— 需要合适的MoveSort，否则"假设后面节点都不如A，再验证"意义不大！
