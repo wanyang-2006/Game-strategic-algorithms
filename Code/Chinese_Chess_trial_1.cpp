@@ -190,6 +190,7 @@ public:
     void copyBoard(Chess *currentBoard) { board = currentBoard; } //
 
     int GridControl[2][90];  //红 / 黑方在9*10棋盘上控制的 点数(红:0 黑:1)
+    bool havecontrol[90];    //所控制的点上，有对方的棋子为true
 
     bool isKingattacked;
     vector<Grid> curstones;
@@ -198,10 +199,10 @@ public:
     bool isattacked(colorType color, int mx, int my);          //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
     bool hasattackchance(int mx,int my);                       //当前位于x y处的棋子是否有吃子的可能
     bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
-    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分                    //根据当前局面，给出静态局面得分
+    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分
     int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
     int calstate_val(vector<Grid> &target,colorType color);    //静态 + 动态得分
-    void getGridcontrol();                                     //填充控制点字典
+    void getGridcontrol();                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
@@ -211,7 +212,7 @@ class ChessAI
 public:
     // ChessAI属性 —— 由棋局状态 、 评估结构体组成
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
-    EvalRecord evaluator; // 独立负责局面打分的评估器实例
+    EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
 
     vector<Move> curlegalmoves; //由chess产生，当前合法的状态
     vector<Move> eatenmoves;    //"死手"——产生吃子的着棋
@@ -1499,9 +1500,10 @@ static const int end_Cannon[90] = {
    100,100,100,104,106,104,100,100,100,
 };
 
+//填充Gridcontrol 格点控制表
 void EvalRecord::getGridcontrol(){
     if(board == nullptr){
-        throw std::runtime_error("EvalRecord::board is null");
+        throw std::runtime_error("(getGridcontrol)board is null");
     }
 
     //每次使用前都重新清空控制点字典
@@ -1511,6 +1513,7 @@ void EvalRecord::getGridcontrol(){
         }
     }
 
+    //当前棋局:
     int tmp = board->currTurnId;
     for(int y = 0; y < BOARDHEIGHT; y ++){
         for(int x = 0; x < BOARDWIDTH; x ++){
@@ -1519,14 +1522,14 @@ void EvalRecord::getGridcontrol(){
                 continue;
             }
 
-            //按照约定：红色映射到0，黑色映射到1
+            //红色映射到0，黑色映射到1
             int colorId = (curGrid.color == RED ? 0 : 1);
 
             switch (curGrid.type)
             {
             case None:
                 break;
-            case King:
+            case King: //将帅是否能够攻击：普通攻击 / 照面将
             {
                 for(int dir = 0; dir < 4; dir ++){
                     int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
@@ -1534,6 +1537,10 @@ void EvalRecord::getGridcontrol(){
                         continue;
                     }
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                    //这里不使用color传参，使用board中的currColor
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
                 }
                 //将帅照面：King沿竖线遇到对方King时，同样计为可控制
                 for(int dir = -1; dir <= 1; dir += 2){
@@ -1543,6 +1550,11 @@ void EvalRecord::getGridcontrol(){
                         if(tGrid.color != EMPTY){
                             if(tGrid.type == King && tGrid.color != curGrid.color){
                                 GridControl[colorId][board->xy2pos(x, ty)] ++;
+                                
+                                //填充havecontrol
+                                if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(x,ty)].type != None){
+                                    this->havecontrol[board->xy2pos(x,y)] = true;
+                                }
                             }
                             break;
                         }
@@ -1559,6 +1571,11 @@ void EvalRecord::getGridcontrol(){
                         continue;
                     }
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                    
+                    //填充havecontrol
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
                 }
                 break;
             }
@@ -1575,6 +1592,11 @@ void EvalRecord::getGridcontrol(){
                         continue;
                     }
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
+
+                    //填充havecontrol
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
                 }
                 break;
             }
@@ -1591,6 +1613,11 @@ void EvalRecord::getGridcontrol(){
                         continue;
                     }
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
+
+
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
                 }
                 break;
             }
@@ -1600,6 +1627,9 @@ void EvalRecord::getGridcontrol(){
                     int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
                     while(board->inBoard(tx, ty)){
                         GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                            this->havecontrol[board->xy2pos(x,y)] = true;
+                        }
                         auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
                         if(tGrid.color != EMPTY){
                             break;
@@ -1621,11 +1651,14 @@ void EvalRecord::getGridcontrol(){
                             if(tGrid.color == EMPTY){
                                 GridControl[colorId][board->xy2pos(tx, ty)] ++;
                             }else{
-                                hasScreen = true;
+                                hasScreen = true;  //被遮挡，能架炮。第一个架炮点之前的位置都不算控制
                             }
                         }else{
                             if(tGrid.color != EMPTY){
                                 GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                            if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                                this->havecontrol[board->xy2pos(x,y)] = true;
+                            }
                                 break;
                             }
                         }
@@ -1641,6 +1674,9 @@ void EvalRecord::getGridcontrol(){
                 int tx = x, ty = y + forwardOne;
                 if(board->inBoard(tx, ty)){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
                 }
                 bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
                 if(crossMidLine){
@@ -1648,6 +1684,9 @@ void EvalRecord::getGridcontrol(){
                         tx = x + dx_lr[dir], ty = y;
                         if(board->inBoard(tx, ty)){
                             GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                        }
+                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                            this->havecontrol[board->xy2pos(x,y)] = true;
                         }
                     }
                 }
@@ -1659,9 +1698,9 @@ void EvalRecord::getGridcontrol(){
 }
 
 bool EvalRecord::hasattackchance(int mx,int my){
-    //使用targetControl数组————该点由谁控制?
-    //依靠board->generateMoves
-    return false; // 需按照具体上下文重构
+
+    //依靠board->getGridcontrol
+    return this->havecontrol[board->xy2pos(mx,my)];
 }
 
 //当前是否为中局：车 6 马炮 3 其它 1
@@ -1690,6 +1729,9 @@ bool EvalRecord::ismiddlecompostion(vector<Grid>& vec){
 //参考Eleeye中的静态估值 vec调用board->state中的当前状态
 int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
 {
+    if(this->board == nullptr){
+        throw(std::runtime_error("(calstaticstate)board is null"));
+    }
     bool ismiddle = ismiddlecompostion(vec);
     //判断color:红色和黑色的静态表对称
 
@@ -1832,12 +1874,67 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
 
 //借鉴eleeye中的一系列动态得分机制
 
-//1.特殊棋型 空头炮 / 窝心马
-//2.进攻度分析
-//3.防御度分析
+//1.特殊棋型 空头炮 / 窝心马(暂时不考虑)
+//2.进攻度分析 —————— 对对方半场的控制度
+//3.防御度分析 —————— 对我方半场的控制度
+const int EnemyKingArea = 8;  //敌方九宫区域 ———— 最为重要，唯有控制敌方九宫才有夺取胜利的机会！
+const int EnemyHalf = 5; 
+const int OwnHalf = 2;        //我方半场
+const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
+const int attackweight;       //或使用double，进攻权重
+const int defenceweight;      //或使用double，防御权重
+int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
+    //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
+    int myattack = 0,myDefense = 0; 
+    int oppattack = 0,oppDefence = 0;
 
+    //区分颜色
+    int idx = (color == RED) ? 0 : 1; //对应控制表内不同映射
+    for(int y = 9;y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            auto& tmpgrid = target[board->xy2pos(x,y)];
+            int pos = board->xy2pos(x,y);
 
+            if(idx == 0){
+                if(y <= 4){ //红方半场
+                    if(board->inKingArea(x,y,RED)){
+                        myDefense += GridControl[idx][pos] * OwnKingArea;
+                    }else{
+                        myDefense += GridControl[idx][pos] * OwnHalf;
+                    }
+                }else{
+                    if(board->inKingArea(x,y,RED)){
+                        myattack += GridControl[idx][pos] * EnemyKingArea;
+                    }else{
+                        myattack += GridControl[idx][pos] * EnemyHalf;
+                    }
+                }
+            }else{
+                if(y >= 5){ //黑方半场
+                    if(board->inKingArea(x,y,BLACK)){
+                        myDefense += GridControl[idx][pos] * OwnKingArea;
+                    }else{
+                        myDefense += GridControl[idx][pos] * OwnHalf;
+                    }
+                }else{
+                    if(board->inKingArea(x,y,BLACK)){
+                        myattack += GridControl[idx][pos] * EnemyKingArea;
+                    }else{
+                        myattack += GridControl[idx][pos] * EnemyHalf;
+                    }
+                }
+            }
+        }
+    }
+    
+    //进攻度分析 ———— Gridcontrol 我方在对方半场的控制点、对方在对方半场的控制点
 
+    //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
+
+    //最终结果为：我方总得分 - 对方总得分
+    int res = attackweight * (myattack - oppattack) + defenceweight * (myDefense - oppDefence);
+    return res;
+}
 
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
