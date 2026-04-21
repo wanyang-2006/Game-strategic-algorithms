@@ -222,23 +222,26 @@ public:
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
     
-    bool isWin = false;             //是否获胜
     vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
-    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分
+    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分~
     vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
-    vector<MoveNode> selected;      //经过处理后的Move方法
+    vector<MoveNode> select;      //经过处理后的Move方法
 
     // ChessAI方法
+    bool getWin();                                             //更新isWin,判断是否胜利
     void getcurstones(void);
     void generateMovesWithForbidden();                         //对应board的同名方法
     void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
     int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
     void fillinMoveNodes(vector<MoveNode>& nodes);             //将博弈树的MoveNodes节点进行赋值，并排序
+    void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target); //对某层的MoveNodes节点从target填充并排序
     void MoveNodesort(vector<MoveNode>& nodes);                //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
     void MoveNodeFront(MoveNode& tmpmove);                     //(用于博弈树的向下遍历) ———— 进行当前的着法 
     //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
     void MoveNodeBack(MoveNode& tmpmove);                      //(用于博弈树的回溯) ———— 撤销当前的着法
-    int alpha_beta_search(int depth,int alpha,int beta);                 //基本alpha_beta搜素函数
+    
+    void alpha_beta_select(vector<MoveNode>& selected);                                   //无参alpha_beta
+    int alpha_beta_search(int depth,int alpha,int beta);       //基本alpha_beta搜素函数
     
     ChessAI();
     ~ChessAI();
@@ -2008,6 +2011,16 @@ void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
     this->MoveNodesort(nodes);
 }
 
+void ChessAI::fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target){
+    for(auto& M : target){
+        nodes.push_back({M,-1});
+    }
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
 //根据当前对于局面的评分函数，针对当前的Move进行评分，降序排列
 bool MoveNodecmp(const MoveNode& Nodex, const MoveNode& Nodey) {
     return Nodex.value > Nodey.value;
@@ -2026,9 +2039,98 @@ void ChessAI::MoveNodeBack(MoveNode& tmpmove){
     this->board->undoMove();
 }
 
-int ChessAI::alpha_beta_search(int depth,int alpha,int beta){
-
+bool ChessAI::getWin(){
+    auto& tmpstate = this->board->state[board->currTurnId];
+    for(auto& s : tmpstate){
+        if(s.color == board->oppColor() && s.type == King){
+            return false;
+        }
+    }
+    return true;
 }
+
+//初始化min max值
+const int minstateval = -9999999;
+const int maxstateval = 9999999;
+//着重考虑selected等全局变量应该如何处理
+void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
+    int max_depth = 10;  //最大搜素深度
+    int alpha = minstateval;
+    int beta = maxstateval;
+
+    //当前所有合法的着法
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    //selected初始化 
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;      //初始值赋值成极小值
+        selected.push_back(newMoveNode);
+    }
+
+    //不要忘记预先评价
+    MoveNodesort(selected);
+
+    //类似DFS —— 对深层的每一个着法进行探索并记录评分
+    for(auto& Node : selected){
+        MoveNodeFront(Node);
+
+        int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+
+        MoveNodeBack(Node);
+        //将深层传回来的得分，记录到根节点的MoveNode属性中
+        Node.value = score;
+
+        //更新alpha
+        if(score > alpha){
+            alpha = score;
+        }
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+
+    //select 降序大根堆
+}
+
+//alpha —— beta 具体搜索函数
+
+int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
+    if (depth == 0) { 
+        vector<Grid> currentTarget;
+        // evaluator部分获取当前局面状态
+        return evaluator.calstate(currentTarget, board->currColor); 
+    }
+
+    if(getWin()){
+        return 999999; 
+    }
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+    for(auto node : tmpMoveNodes){
+        MoveNodeFront(node);
+        int val = -alpha_beta_search(depth - 1,-beta,-alpha);
+        MoveNodeBack(node);
+
+        if(val >= beta){
+            return beta;
+        }
+        if(val > alpha){
+            alpha = val;
+        }
+    }
+    return alpha;
+}
+
 
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
