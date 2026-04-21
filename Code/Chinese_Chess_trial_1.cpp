@@ -240,9 +240,11 @@ public:
     //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
     void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
     
+    //将搜索入口和搜索体相互剥离
     void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
     int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
-    
+    void alpha_beta_PVS_select(vector<MoveNode>& selected);                   //alpha_beta_PMV 搜索入口
+    int alpha_beta_PVS_search(int depth,int alpha,int beta);                      //alpha_beta_PMV 搜索函数
     bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
     bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
 
@@ -2080,11 +2082,11 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 
     //类似DFS —— 对深层的每一个着法进行探索并记录评分
     for(auto& Node : selected){
-        MoveNodeFront(Node);
+        MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
 
         int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
 
-        MoveNodeBack(Node);
+        MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
         //将深层传回来的得分，记录到根节点的MoveNode属性中
         Node.value = score;
 
@@ -2099,13 +2101,48 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
     //select 降序大根堆
 }
 
-//alpha —— beta 具体搜索函数
+void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
+    int max_depth = 10;
+    int alpha = minstateval;
+    int beta = maxstateval;
+  
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;
+        selected.push_back(newMoveNode);
+    }
+
+    MoveNodesort(selected);
+
+    for(auto& Node : selected){
+        MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+
+        int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+
+        MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
+        //将深层传回来的得分，记录到根节点的MoveNode属性中
+        Node.value = score;
+
+        //更新alpha
+        if(score > alpha){
+            alpha = score;
+        }
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+}
+
+//alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
 
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     if (depth == 0) { 
-        vector<Grid> currentTarget;
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
-        return evaluator.calstate(currentTarget, board->currColor); 
+        return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
     }
 
     if(getWin()){
@@ -2137,6 +2174,51 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 }
 //克服水平线效应————直到局面“稳定”，没有吃子再停止搜索
 
+//Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
+int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
+    bool foundPV = false;
+    if(depth == 0){
+        return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+    }
+
+    if(getWin()){
+        return 999999;
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+    int val;
+    for(auto node : tmpMoveNodes){
+        this->MoveNodeFront(node);
+        if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
+            val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
+            if((val > alpha) && (val < beta)){ //本区间内检查失败！
+                val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+            }
+        }else{
+            val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+        }
+        this->MoveNodeBack(node);
+
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+            foundPV = true;
+        }
+    }
+    return alpha;
+}
+
+
 bool ChessAI::havethreat(vector<Grid>& tmp,colorType color){
     for(int y = 9; y >= 0; y --){
         for(int x = 0;x <= 8;x ++){
@@ -2162,6 +2244,7 @@ bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
 
     return false;
 }
+
 
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
