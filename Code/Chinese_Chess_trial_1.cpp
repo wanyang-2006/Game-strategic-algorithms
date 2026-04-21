@@ -6,6 +6,7 @@
 #include <cassert>
 #include <algorithm>
 #include <vector>
+#include <stdexcept>
 #include <time.h>
 #include "jsoncpp/json.h"
 #include <queue>
@@ -81,6 +82,47 @@ char int2char(int i)
 {
     return (char)((int)'0' + i);
 }
+
+class TimeOutException : public std::runtime_error
+{
+public:
+    TimeOutException() : std::runtime_error("Time limit exceeded") {}
+};
+
+class SearchTime
+{
+private:
+    clock_t startTime;
+    int timeLimit_ms; // 毫秒
+    int checkerCount;
+
+public:
+    SearchTime(int limit_ms = 900) : startTime(0), timeLimit_ms(limit_ms), checkerCount(0) {}
+
+    void setLimitMs(int limit_ms)
+    {
+        timeLimit_ms = limit_ms;
+    }
+
+    void start()
+    {
+        startTime = clock();
+        checkerCount = 0;
+    }
+
+    inline void check()
+    {
+        if (checkerCount++ % 1024 == 0) // 每1024次检查一次时间
+        {
+            clock_t currentTime = clock();
+            double durationTime_ms = double(currentTime - startTime) / CLOCKS_PER_SEC * 1000;
+            if (durationTime_ms > timeLimit_ms)
+            {
+                throw TimeOutException();
+            }
+        }
+    }
+};
 
 struct Move
 {
@@ -226,6 +268,7 @@ public:
     vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分~
     vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
     vector<MoveNode> select;      //经过处理后的Move方法
+    SearchTime searchTime;          // 搜索计时器
 
     // ChessAI方法
     bool getWin();                                                            //更新isWin,判断是否胜利
@@ -1339,6 +1382,7 @@ void ChessAI::getdiffmoves()
 }
 
 ChessAI::ChessAI()
+    : searchTime(900)
 {
     this->board = new Chess();
     this->evaluator.copyBoard(this->board);
@@ -2080,20 +2124,28 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
     //不要忘记预先评价
     MoveNodesort(selected);
 
+    // 搜索计时从根节点开始
+    searchTime.start();
+
     //类似DFS —— 对深层的每一个着法进行探索并记录评分
-    for(auto& Node : selected){
-        MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
 
-        int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+            int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
 
-        MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
-        //将深层传回来的得分，记录到根节点的MoveNode属性中
-        Node.value = score;
+            MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
+            //将深层传回来的得分，记录到根节点的MoveNode属性中
+            Node.value = score;
 
-        //更新alpha
-        if(score > alpha){
-            alpha = score;
+            //更新alpha
+            if(score > alpha){
+                alpha = score;
+            }
         }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
     }
 
     sort(selected.begin(),selected.end(),MoveNodecmp);
@@ -2119,19 +2171,27 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
 
     MoveNodesort(selected);
 
-    for(auto& Node : selected){
-        MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+    // 搜索计时从根节点开始
+    searchTime.start();
 
-        int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
 
-        MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
-        //将深层传回来的得分，记录到根节点的MoveNode属性中
-        Node.value = score;
+            int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
 
-        //更新alpha
-        if(score > alpha){
-            alpha = score;
+            MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
+            //将深层传回来的得分，记录到根节点的MoveNode属性中
+            Node.value = score;
+
+            //更新alpha
+            if(score > alpha){
+                alpha = score;
+            }
         }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
     }
 
     sort(selected.begin(),selected.end(),MoveNodecmp);
@@ -2140,6 +2200,8 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
 //alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
 
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
+    searchTime.check();
+
     if (depth == 0) { 
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
         return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
@@ -2176,6 +2238,8 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 
 //Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
 int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
+    searchTime.check();
+
     bool foundPV = false;
     if(depth == 0){
         return evaluator.calstate(board->state[board->currTurnId],board->currColor);
