@@ -112,11 +112,11 @@ struct Move
 //数学理论上，是根据状态构建博弈树，实际上使用着法节点构成博弈树 —— 避免程序过大的开销
 struct MoveNode
 {
-    Move *strategy;
+    Move strategy;
     int value = -1; //初始值为-1
     bool operator==(const MoveNode &other)
     {
-        return *(this->strategy) == *(other.strategy);
+        return (this->strategy) == (other.strategy);
     }
 };
 
@@ -209,6 +209,8 @@ public:
     int calstate(vector<Grid>& target,colorType color);        //计算出当前局面的总得分
     void getGridcontrol();                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
+
+    
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
@@ -219,11 +221,11 @@ public:
     // ChessAI属性 —— 由棋局状态 、 评估结构体组成
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
-
+    
+    bool isWin = false;             //是否获胜
     vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
-    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋
+    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分
     vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
-
     vector<MoveNode> selected;      //经过处理后的Move方法
 
     // ChessAI方法
@@ -231,8 +233,13 @@ public:
     void generateMovesWithForbidden();                         //对应board的同名方法
     void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
     int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
-    void MoveNodesort();                                           //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
-
+    void fillinMoveNodes(vector<MoveNode>& nodes);             //将博弈树的MoveNodes节点进行赋值，并排序
+    void MoveNodesort(vector<MoveNode>& nodes);                //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeFront(MoveNode& tmpmove);                     //(用于博弈树的向下遍历) ———— 进行当前的着法 
+    //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
+    void MoveNodeBack(MoveNode& tmpmove);                      //(用于博弈树的回溯) ———— 撤销当前的着法
+    int alpha_beta_search(int depth,int alpha,int beta);                 //基本alpha_beta搜素函数
+    
     ChessAI();
     ~ChessAI();
 };
@@ -1056,6 +1063,7 @@ colorType Chess::oppColor(colorType mcolor)
 }
 
 // 撤销落子并恢复系统至上一步状态的函数定义
+// 注意先前的状态均需要改变
 void Chess::undoMove()
 {
     if (currTurnId == 0)
@@ -1311,7 +1319,7 @@ void ChessAI::getdiffmoves()
 {
     for (auto &s : this->curlegalmoves)
     {
-        if (board->state[board->currTurnId][board->xy2pos(s.strategy->target_x, s.strategy->target_y)].color == board->oppColor())
+        if (board->state[board->currTurnId][board->xy2pos(s.strategy.target_x, s.strategy.target_y)].color == board->oppColor())
         {
             this->eatenmoves.push_back(s);
         }
@@ -1991,18 +1999,34 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //自身增量减去对方增量
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
-//根据当前对于局面的评分函数，针对当前的Move进行评分
-bool MoveNodecmp(MoveNode& Nodex,MoveNode& Nodey){
 
+//填充MoveNode，并排序
+void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
+//根据当前对于局面的评分函数，针对当前的Move进行评分，降序排列
+bool MoveNodecmp(const MoveNode& Nodex, const MoveNode& Nodey) {
     return Nodex.value > Nodey.value;
 }
-//curlegalMove，暂时将seleted = curlegalMove(排序后)
-void ChessAI::MoveNodesort(){
-    //快速排序 vector<Move> 
-    sort(this->curlegalmoves.begin(),this->curlegalmoves.end(),MoveNodesort);
 
-    //PVS ———— 大根堆进行搜素，设置第一个最佳，依次递减（证明后面的节点比首节点小）
-    this->selected = this->curlegalmoves;
+void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
+    //快速排序 vector<MoveNode> 
+    sort(nodes.begin(), nodes.end(), MoveNodecmp);
+}
+void ChessAI::MoveNodeFront(MoveNode& tmpmove){
+    // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
+    board->makeMoveAssumeLegal(tmpmove.strategy);
+}
+// 对应撤销走法
+void ChessAI::MoveNodeBack(MoveNode& tmpmove){
+    this->board->undoMove();
+}
+
+int ChessAI::alpha_beta_search(int depth,int alpha,int beta){
 
 }
 
