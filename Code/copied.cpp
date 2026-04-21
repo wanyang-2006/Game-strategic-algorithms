@@ -8,6 +8,8 @@
 #include <vector>
 #include <time.h>
 #include "jsoncpp/json.h"
+#include <queue>
+#include <utility>
 
 using std::cin;
 using std::cout;
@@ -15,7 +17,7 @@ using std::endl;
 using std::map;
 using std::string;
 using std::vector;
-using std::sort;
+using std::pair;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度
@@ -111,7 +113,7 @@ struct Move
 struct MoveNode
 {
     Move *strategy;
-    int value;
+    int value = -1; //初始值为-1
     bool operator==(const MoveNode &other)
     {
         return *(this->strategy) == *(other.strategy);
@@ -154,6 +156,7 @@ public:
     void resetBoard();                                                                 // 重置棋盘为初始状态
     void generateMoves(vector<Move> &legalMoves, bool mustDefend = true);              // 生成常规合法移动步
     void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend = true); // 生成包含禁手规则的合法移动步
+    void generateMoveNodesWithForbidden(vector<MoveNode> &legalNodes, bool mustDefend = true);  //新增————生成合法MoveNode
     bool repeatAfterMove(const Move &move);                                            // 判断移动后是否出现长将/长捉等重复局面
     static bool inBoard(int mx, int my);                                               // 判断坐标是否在棋盘内
     static bool inKingArea(int mx, int my, colorType mcolor);                          // 判断是否在九宫格内
@@ -217,17 +220,18 @@ public:
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
 
-    vector<Move> curlegalmoves; //由chess产生，当前合法的状态
-    vector<Move> eatenmoves;    //"死手"——产生吃子的着棋
-    vector<Move> plainmoves;    //"白手"——不产生吃子的着棋
+    vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
+    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋
+    vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
 
-    vector<Move> selected;      //经过估值和搜素，最终得到的最佳移动策略
+    vector<MoveNode> selected;      //经过处理后的Move方法
 
     // ChessAI方法
     void getcurstones(void);
     void generateMovesWithForbidden();                         //对应board的同名方法
     void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
     int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
+    void MoveNodesort();                                           //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
 
     ChessAI();
     ~ChessAI();
@@ -1080,6 +1084,8 @@ void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend
     }
 }
 
+
+
 // 评估某步移动后是否会导致达到三次重复局面的函数定义
 bool Chess::repeatAfterMove(const Move &move)
 {
@@ -1297,7 +1303,7 @@ bool EvalRecord::isattacked(colorType color, int mx, int my)
 
 void ChessAI::generateMovesWithForbidden()
 {
-    board->generateMovesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
+    board->generateMoveNodesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
     //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
 }
 
@@ -1305,7 +1311,7 @@ void ChessAI::getdiffmoves()
 {
     for (auto &s : this->curlegalmoves)
     {
-        if (board->state[board->currTurnId][board->xy2pos(s.target_x, s.target_y)].color == board->oppColor())
+        if (board->state[board->currTurnId][board->xy2pos(s.strategy->target_x, s.strategy->target_y)].color == board->oppColor())
         {
             this->eatenmoves.push_back(s);
         }
@@ -1986,8 +1992,19 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
 //根据当前对于局面的评分函数，针对当前的Move进行评分
+bool MoveNodecmp(MoveNode& Nodex,MoveNode& Nodey){
 
+    return Nodex.value > Nodey.value;
+}
+//curlegalMove，暂时将seleted = curlegalMove(排序后)
+void ChessAI::MoveNodesort(){
+    //快速排序 vector<Move> 
+    sort(this->curlegalmoves.begin(),this->curlegalmoves.end(),MoveNodesort);
 
+    //PVS ———— 大根堆进行搜素，设置第一个最佳，依次递减（证明后面的节点比首节点小）
+    this->selected = this->curlegalmoves;
+
+}
 
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
