@@ -15,6 +15,7 @@ using std::endl;
 using std::map;
 using std::string;
 using std::vector;
+using std::sort;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度

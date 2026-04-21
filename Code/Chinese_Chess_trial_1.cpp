@@ -8,6 +8,7 @@
 #include <vector>
 #include <time.h>
 #include "jsoncpp/json.h"
+#include <queue>
 
 using std::cin;
 using std::cout;
@@ -227,6 +228,7 @@ public:
     void generateMovesWithForbidden();                         //对应board的同名方法
     void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
     int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
+    void Movesort();                                           //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
 
     ChessAI();
     ~ChessAI();
