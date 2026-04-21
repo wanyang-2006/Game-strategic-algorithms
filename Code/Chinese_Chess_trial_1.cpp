@@ -201,13 +201,13 @@ public:
     vector<Grid> curstones;
     vector<bool> curattacked;
     
-    bool isattacked(colorType color, int mx, int my);          //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
-    bool hasattackchance(int mx,int my);                       //当前位于x y处的棋子是否有吃子的可能
-    bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
-    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分
-    int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
-    int calstate(vector<Grid>& target,colorType color);        //计算出当前局面的总得分
-    void getGridcontrol();                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
+    bool isattacked(colorType color, int mx, int my);                          //(对方的棋子颜色，我方的棋子位置x y) 某一方方位于mx my点的棋子是否可能被吃
+    bool hasattackchance(int mx,int my);                                       //当前位于x y处的棋子是否有吃子的可能
+    bool ismiddlecompostion(vector<Grid>& target);                             //是否为中局 / 残局
+    int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
+    int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
+    int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
 
     
@@ -228,21 +228,24 @@ public:
     vector<MoveNode> select;      //经过处理后的Move方法
 
     // ChessAI方法
-    bool getWin();                                             //更新isWin,判断是否胜利
+    bool getWin();                                                            //更新isWin,判断是否胜利
     void getcurstones(void);
-    void generateMovesWithForbidden();                         //对应board的同名方法
-    void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
-    int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
-    void fillinMoveNodes(vector<MoveNode>& nodes);             //将博弈树的MoveNodes节点进行赋值，并排序
+    void generateMovesWithForbidden();                                        //对应board的同名方法
+    void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
+    int alpha_beta_search();                                                  //alpha-beta剪枝，获得最佳得分
+    void fillinMoveNodes(vector<MoveNode>& nodes);                            //将博弈树的MoveNodes节点进行赋值，并排序
     void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target); //对某层的MoveNodes节点从target填充并排序
-    void MoveNodesort(vector<MoveNode>& nodes);                //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
-    void MoveNodeFront(MoveNode& tmpmove);                     //(用于博弈树的向下遍历) ———— 进行当前的着法 
+    void MoveNodesort(vector<MoveNode>& nodes);                               //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeFront(MoveNode& tmpmove);                                    //(用于博弈树的向下遍历) ———— 进行当前的着法 
     //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
-    void MoveNodeBack(MoveNode& tmpmove);                      //(用于博弈树的回溯) ———— 撤销当前的着法
+    void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
     
-    void alpha_beta_select(vector<MoveNode>& selected);                                   //无参alpha_beta
-    int alpha_beta_search(int depth,int alpha,int beta);       //基本alpha_beta搜素函数
+    void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
+    int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
     
+    bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
+    bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
+
     ChessAI();
     ~ChessAI();
 };
@@ -2039,6 +2042,7 @@ void ChessAI::MoveNodeBack(MoveNode& tmpmove){
     this->board->undoMove();
 }
 
+//该步是否获得胜利
 bool ChessAI::getWin(){
     auto& tmpstate = this->board->state[board->currTurnId];
     for(auto& s : tmpstate){
@@ -2100,13 +2104,14 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     if (depth == 0) { 
         vector<Grid> currentTarget;
-        // evaluator部分获取当前局面状态
+        // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
         return evaluator.calstate(currentTarget, board->currColor); 
     }
 
     if(getWin()){
         return 999999; 
     }
+
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
@@ -2120,18 +2125,45 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         MoveNodeFront(node);
         int val = -alpha_beta_search(depth - 1,-beta,-alpha);
         MoveNodeBack(node);
-
-        if(val >= beta){
+        
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
             return beta;
         }
-        if(val > alpha){
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
             alpha = val;
         }
     }
     return alpha;
 }
+//克服水平线效应————直到局面“稳定”，没有吃子再停止搜索
 
+bool ChessAI::havethreat(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            if(tmp[board->xy2pos(x,y)].color == color && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
 
+    return false;
+}
+
+bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            auto tmptype = tmp[board->xy2pos(x,y)].type;
+            bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
+            if(tmp[board->xy2pos(x,y)].color == color && is_important && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+//PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
 //非吃子的估值
