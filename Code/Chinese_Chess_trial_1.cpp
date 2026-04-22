@@ -375,9 +375,13 @@ public:
     void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
     int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
     void alpha_beta_PVS_select(vector<MoveNode>& selected);                   //alpha_beta_PMV 搜索入口
-    int alpha_beta_PVS_search(int depth,int alpha,int beta);                      //alpha_beta_PMV 搜索函数
+    int alpha_beta_PVS_search(int depth,int alpha,int beta);                  //alpha_beta_PMV 搜索函数
+    bool haveattack(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在“攻击”
     bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
     bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
+    bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
+    bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
+
 
     ChessAI();
     ~ChessAI();
@@ -2501,15 +2505,42 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         }
     }
 
+    //=====HashTable搜素完成=====\\
+
     //记录TT 表中，所得到的最优节点
     int original_alpha = alpha;
     Move best_move; //当前节点探索出的最佳着法
     int val;
 
+    //LMR改进 ———— 执行探测 val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha); 
+    //零窗口探测之前，先判断是否跳过部分深度。如果判定成功，才进行下一步的补充搜素，从而在残局和中局减少分支节点
+    //这一步必须是“白手” ———— 这一步着棋没有吃子和将军
+    int moveIndex = 0; //LMR ———— 当前是第几个着法
+
     for(auto& node : tmpMoveNodes){
         {
             MoveGuard guard(this, node);
+
+            bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
+
             if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
+
+                // =====LMR逻辑===== \\
+                
+                if(depth >= 3 && moveIndex && isQuiet){
+                    int R = 1; //裁剪因子，减去深度R
+                    //先进行0窗口试探，如果返回值大于alpha,说明它有潜力越界，这对于QuietMove是反常的！必须重新搜素！
+                    val = -alpha_beta_PVS_search(depth - 1 - R, -alpha - 1,-alpha);
+
+                    if(val > alpha){
+                        val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                    }
+                }else{
+                    //否则，使用常规的PVS零窗口搜素
+                    val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                }
+                // =====LMR逻辑结束===== \\
+
                 val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
                 if((val > alpha) && (val < beta)){ //本区间内检查失败！
                     val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
@@ -2567,7 +2598,38 @@ bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
     return false;
 }
 
+bool ChessAI::haveattack(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            if(tmp[board->xy2pos(x,y)].color == this->board->oppColor() && evaluator.isattacked(board->currColor,x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
 
+    return false;
+}
+
+bool ChessAI::haveattack_of_valuestone(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            auto tmptype = tmp[board->xy2pos(x,y)].type;
+            bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
+            if(tmp[board->xy2pos(x,y)].color == board->oppColor() && is_important && evaluator.isattacked(board->currColor,x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+//是否为“白手”
+bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
+    MoveNodeFront(tmpmove);
+    this->evaluator.getGridcontrol();
+    return havethreat(board->state[board->currTurnId],board->currColor);
+}
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
