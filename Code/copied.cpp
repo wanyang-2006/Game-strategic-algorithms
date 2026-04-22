@@ -6,6 +6,7 @@
 #include <cassert>
 #include <algorithm>
 #include <vector>
+#include <stdexcept>
 #include <time.h>
 #include "jsoncpp/json.h"
 #include <queue>
@@ -82,6 +83,47 @@ char int2char(int i)
     return (char)((int)'0' + i);
 }
 
+class TimeOutException : public std::runtime_error
+{
+public:
+    TimeOutException() : std::runtime_error("Time limit exceeded") {}
+};
+
+class SearchTime
+{
+private:
+    clock_t startTime;
+    int timeLimit_ms; // 毫秒
+    int checkerCount;
+
+public:
+    SearchTime(int limit_ms = 900) : startTime(0), timeLimit_ms(limit_ms), checkerCount(0) {}
+
+    void setLimitMs(int limit_ms)
+    {
+        timeLimit_ms = limit_ms;
+    }
+
+    void start()
+    {
+        startTime = clock();
+        checkerCount = 0;
+    }
+
+    inline void check()
+    {
+        if (checkerCount++ % 1024 == 0) // 每1024次检查一次时间
+        {
+            clock_t currentTime = clock();
+            double durationTime_ms = double(currentTime - startTime) / CLOCKS_PER_SEC * 1000;
+            if (durationTime_ms > timeLimit_ms)
+            {
+                throw TimeOutException();
+            }
+        }
+    }
+};
+
 struct Move
 {
     int source_x, source_y, target_x, target_y;
@@ -112,11 +154,11 @@ struct Move
 //数学理论上，是根据状态构建博弈树，实际上使用着法节点构成博弈树 —— 避免程序过大的开销
 struct MoveNode
 {
-    Move *strategy;
+    Move strategy;
     int value = -1; //初始值为-1
     bool operator==(const MoveNode &other)
     {
-        return *(this->strategy) == *(other.strategy);
+        return (this->strategy) == (other.strategy);
     }
 };
 
@@ -201,14 +243,16 @@ public:
     vector<Grid> curstones;
     vector<bool> curattacked;
     
-    bool isattacked(colorType color, int mx, int my);          //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
-    bool hasattackchance(int mx,int my);                       //当前位于x y处的棋子是否有吃子的可能
-    bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
-    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分
-    int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
-    int calstate(vector<Grid>& target,colorType color);        //计算出当前局面的总得分
-    void getGridcontrol();                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
+    bool isattacked(colorType color, int mx, int my);                          //(对方的棋子颜色，我方的棋子位置x y) 某一方方位于mx my点的棋子是否可能被吃
+    bool hasattackchance(int mx,int my);                                       //当前位于x y处的棋子是否有吃子的可能
+    bool ismiddlecompostion(vector<Grid>& target);                             //是否为中局 / 残局
+    int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
+    int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
+    int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
+
+    
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
@@ -219,19 +263,33 @@ public:
     // ChessAI属性 —— 由棋局状态 、 评估结构体组成
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
-
+    
     vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
-    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋
+    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分~
     vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
-
-    vector<MoveNode> selected;      //经过处理后的Move方法
+    vector<MoveNode> select;      //经过处理后的Move方法
+    SearchTime searchTime;          // 搜索计时器
 
     // ChessAI方法
+    bool getWin();                                                            //更新isWin,判断是否胜利
     void getcurstones(void);
-    void generateMovesWithForbidden();                         //对应board的同名方法
-    void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
-    int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
-    void MoveNodesort();                                           //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void generateMovesWithForbidden();                                        //对应board的同名方法
+    void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
+    int alpha_beta_search();                                                  //alpha-beta剪枝，获得最佳得分
+    void fillinMoveNodes(vector<MoveNode>& nodes);                            //将博弈树的MoveNodes节点进行赋值，并排序
+    void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target); //对某层的MoveNodes节点从target填充并排序
+    void MoveNodesort(vector<MoveNode>& nodes);                               //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeFront(MoveNode& tmpmove);                                    //(用于博弈树的向下遍历) ———— 进行当前的着法 
+    //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
+    void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
+    
+    //将搜索入口和搜索体相互剥离
+    void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
+    int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
+    void alpha_beta_PVS_select(vector<MoveNode>& selected);                   //alpha_beta_PMV 搜索入口
+    int alpha_beta_PVS_search(int depth,int alpha,int beta);                      //alpha_beta_PMV 搜索函数
+    bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
+    bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
 
     ChessAI();
     ~ChessAI();
@@ -1056,6 +1114,7 @@ colorType Chess::oppColor(colorType mcolor)
 }
 
 // 撤销落子并恢复系统至上一步状态的函数定义
+// 注意先前的状态均需要改变
 void Chess::undoMove()
 {
     if (currTurnId == 0)
@@ -1311,7 +1370,7 @@ void ChessAI::getdiffmoves()
 {
     for (auto &s : this->curlegalmoves)
     {
-        if (board->state[board->currTurnId][board->xy2pos(s.strategy->target_x, s.strategy->target_y)].color == board->oppColor())
+        if (board->state[board->currTurnId][board->xy2pos(s.strategy.target_x, s.strategy.target_y)].color == board->oppColor())
         {
             this->eatenmoves.push_back(s);
         }
@@ -1323,6 +1382,7 @@ void ChessAI::getdiffmoves()
 }
 
 ChessAI::ChessAI()
+    : searchTime(900)
 {
     this->board = new Chess();
     this->evaluator.copyBoard(this->board);
@@ -1991,21 +2051,278 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //自身增量减去对方增量
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
-//根据当前对于局面的评分函数，针对当前的Move进行评分
-bool MoveNodecmp(MoveNode& Nodex,MoveNode& Nodey){
 
+//填充MoveNode，并排序
+void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
+void ChessAI::fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target){
+    for(auto& M : target){
+        nodes.push_back({M,-1});
+    }
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
+//根据当前对于局面的评分函数，针对当前的Move进行评分，降序排列
+bool MoveNodecmp(const MoveNode& Nodex, const MoveNode& Nodey) {
     return Nodex.value > Nodey.value;
 }
-//curlegalMove，暂时将seleted = curlegalMove(排序后)
-void ChessAI::MoveNodesort(){
-    //快速排序 vector<Move> 
-    sort(this->curlegalmoves.begin(),this->curlegalmoves.end(),MoveNodesort);
 
-    //PVS ———— 大根堆进行搜素，设置第一个最佳，依次递减（证明后面的节点比首节点小）
-    this->selected = this->curlegalmoves;
-
+void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
+    //快速排序 vector<MoveNode> 
+    sort(nodes.begin(), nodes.end(), MoveNodecmp);
+}
+void ChessAI::MoveNodeFront(MoveNode& tmpmove){
+    // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
+    board->makeMoveAssumeLegal(tmpmove.strategy);
+}
+// 对应撤销走法
+void ChessAI::MoveNodeBack(MoveNode& tmpmove){
+    this->board->undoMove();
 }
 
+struct MoveGuard {
+    ChessAI* ai;
+    MoveNode& node;
+    MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
+    ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
+//该步是否获得胜利
+bool ChessAI::getWin(){
+    auto& tmpstate = this->board->state[board->currTurnId];
+    for(auto& s : tmpstate){
+        if(s.color == board->currColor && s.type == King){
+            return false;
+        }
+    }
+    return true;
+}
+
+//初始化min max值
+const int minstateval = -9999999;
+const int maxstateval = 9999999;
+//着重考虑selected等全局变量应该如何处理
+void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
+    int max_depth = 10;  //最大搜素深度
+    int alpha = minstateval;
+    int beta = maxstateval;
+
+    //当前所有合法的着法
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    //selected初始化 
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;      //初始值赋值成极小值
+        selected.push_back(newMoveNode);
+    }
+
+    //不要忘记预先评价
+    MoveNodesort(selected);
+
+    // 搜索计时从根节点开始
+    searchTime.start();
+
+    //类似DFS —— 对深层的每一个着法进行探索并记录评分
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+                
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
+
+            //更新alpha
+            if(Node.value > alpha){
+                alpha = Node.value;
+            }
+        }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+
+    //select 降序大根堆
+}
+
+void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
+    int max_depth = 10;
+    int alpha = minstateval;
+    int beta = maxstateval;
+  
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;
+        selected.push_back(newMoveNode);
+    }
+
+    MoveNodesort(selected);
+
+    // 搜索计时从根节点开始
+    searchTime.start();
+
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
+
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
+
+            //更新alpha
+            if(Node.value > alpha){
+                alpha = Node.value;
+            }
+        }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+}
+
+//alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
+
+int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
+    searchTime.check();
+
+    if (depth == 0) { 
+        // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
+        return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+    }
+
+    if(getWin()){
+        return 999999; 
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+    for(auto& node : tmpMoveNodes){
+        int val;
+        {
+            MoveGuard guard(this, node);
+            val = -alpha_beta_search(depth - 1,-beta,-alpha);
+        }
+        
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+        }
+    }
+    return alpha;
+}
+//克服水平线效应————直到局面“稳定”，没有吃子再停止搜索
+
+//Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
+int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
+    searchTime.check();
+
+    bool foundPV = false;
+    if(depth == 0){
+        return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+    }
+
+    if(getWin()){
+        return 999999;
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+    int val;
+    for(auto& node : tmpMoveNodes){
+        {
+            MoveGuard guard(this, node);
+            if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
+                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
+                if((val > alpha) && (val < beta)){ //本区间内检查失败！
+                    val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+                }
+            }else{
+                val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+            }
+        }
+
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+            foundPV = true;
+        }
+    }
+    return alpha;
+}
+
+
+bool ChessAI::havethreat(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            if(tmp[board->xy2pos(x,y)].color == color && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            auto tmptype = tmp[board->xy2pos(x,y)].type;
+            bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
+            if(tmp[board->xy2pos(x,y)].color == color && is_important && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+
+//PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
 //非吃子的估值

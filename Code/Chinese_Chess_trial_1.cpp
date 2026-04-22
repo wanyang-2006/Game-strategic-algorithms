@@ -279,6 +279,7 @@ public:
     void fillinMoveNodes(vector<MoveNode>& nodes);                            //将博弈树的MoveNodes节点进行赋值，并排序
     void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target); //对某层的MoveNodes节点从target填充并排序
     void MoveNodesort(vector<MoveNode>& nodes);                               //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeVoid();                                                      //当前的棋步为空着
     void MoveNodeFront(MoveNode& tmpmove);                                    //(用于博弈树的向下遍历) ———— 进行当前的着法 
     //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
     void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
@@ -2079,6 +2080,17 @@ void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
     //快速排序 vector<MoveNode> 
     sort(nodes.begin(), nodes.end(), MoveNodecmp);
 }
+
+void ChessAI::MoveNodeVoid(){
+    Move tmpmove;
+    //让棋局在此步原地踏步
+    tmpmove.target_x = 1;
+    tmpmove.target_x = 1;
+    tmpmove.target_y = 1;
+    tmpmove.target_y = 1;
+    board->makeMoveAssumeLegal(tmpmove);
+}
+
 void ChessAI::MoveNodeFront(MoveNode& tmpmove){
     // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
     board->makeMoveAssumeLegal(tmpmove.strategy);
@@ -2220,6 +2232,20 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         return 999999; 
     }
 
+    const int R = 2; // 深度缩减参数(Reduction)
+    if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
+        this->MoveNodeVoid(); // 执行空步
+
+        // 尝试一个零窗口探测计算空步后的局面价值
+        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+
+        this->board->undoMove(); // 撤销空步
+
+        // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
+        if (null_val >= beta) {
+            return beta;
+        }
+    }
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
@@ -2258,6 +2284,23 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     if(getWin()){
         return 999999;
+    }
+
+    // 空步裁剪 
+    // 当前局面已经好到对手无法翻盘，本节点即可作为beta截断节点返回。
+    const int R = 2; // 深度缩减参数(Reduction)
+    if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
+        this->MoveNodeVoid(); // 执行空步
+
+        // 尝试一个零窗口探测计算空步后的局面价值
+        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+
+        this->board->undoMove(); // 撤销空步
+
+        // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
+        if (null_val >= beta) {
+            return beta;
+        }
     }
 
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
