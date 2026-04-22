@@ -6,205 +6,320 @@
 #include <cassert>
 #include <algorithm>
 #include <vector>
-#include <time.h>
 #include <stdexcept>
+#include <time.h>
 #include "jsoncpp/json.h"
+#include <queue>
+#include <utility>
 
-using std::string;
-using std::vector;
-using std::map;
 using std::cin;
 using std::cout;
 using std::endl;
+using std::map;
+using std::string;
+using std::vector;
+using std::pair;
 
-class TimeOutException : public std::runtime_error {
-public:
-    TimeOutException() : std::runtime_error("Time out") {}
-};
+#define BOARDWIDTH 9   // 棋盘宽度
+#define BOARDHEIGHT 10 // 棋盘高度
+enum stoneType
+{
+    None = 0,
+    King = 1,
+    Bishop = 2,
+    Knight = 3,
+    Rook = 4,
+    Pawn = 5,
+    Cannon = 6,
+    Assistant = 7
+}; // 棋子类型枚举
+enum colorType
+{
+    BLACK = 0,
+    RED = 1,
+    EMPTY = 2
+};                                                                                                                                                                                                                  // 阵营颜色枚举
+int baseLine[2] = {9, 0};                                                                                                                                                                                           // 红黑双方的底线Y坐标
+char stoneSym[] = "*kbnrpca";                                                                                                                                                                                       // 棋子类型对应的字符表示
+map<char, stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King}, {stoneSym[2], Bishop}, {stoneSym[3], Knight}, {stoneSym[4], Rook}, {stoneSym[5], Pawn}, {stoneSym[6], Cannon}, {stoneSym[7], Assistant}}; // 字符到棋子类型的映射枚举
 
-clock_t startTime;
-const int TIME_LIMIT_MS = 900;// 安全及时900ms
+int dx[] = {-1, -1, -1, 0, 0, 1, 1, 1};            // 8个方向的X轴偏移（通用）
+int dy[] = {-1, 0, 1, -1, 1, -1, 0, 1};            // 8个方向的Y轴偏移（通用）
+int dx_ob[] = {-1, 1, -1, 1};                      // 士（仕）的斜向X轴偏移（4个对角方向）
+int dy_ob[] = {-1, -1, 1, 1};                      // 士（仕）的斜向Y轴偏移（4个对角方向）
+int dx_strai[] = {-1, 0, 0, 1};                    // 直线的X轴偏移（上下左右）
+int dy_strai[] = {0, -1, 1, 0};                    // 直线的Y轴偏移（上下左右）
+int dx_lr[] = {-1, 1};                             // 兵（卒）过河后的左右X轴偏移
+int dx_knight[] = {-2, -2, -1, -1, 1, 1, 2, 2};    // 马走“日”目的地的X轴偏移
+int dy_knight[] = {-1, 1, -2, 2, -2, 2, -1, 1};    // 马走“日”目的地的Y轴偏移
+int dx_knight_foot[] = {-1, -1, 0, 0, 0, 0, 1, 1}; // 马走“日”对应的蹩马腿检查点X轴偏移
+int dy_knight_foot[] = {0, 0, -1, 1, -1, 1, 0, 0}; // 马走“日”对应的蹩马腿检查点Y轴偏移
+int dx_bishop[] = {-2, -2, 2, 2};                  // 象（相）走“田”目的地的X轴偏移
+int dy_bishop[] = {-2, 2, -2, 2};                  // 象（相）走“田”目的地的Y轴偏移
+int dx_bishop_eye[] = {-1, -1, 1, 1};              // 象（相）走“田”对应的塞象眼检查点X轴偏移
+int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”对应的塞象眼检查点Y轴偏移
 
-inline void checkTime() {
-    clock_t now = clock();//转换为毫秒
-    int duration_ms = (now - startTime) * 1000 / CLOCKS_PER_SEC; 
-    
-    if (duration_ms > TIME_LIMIT_MS) {
-        throw TimeOutException(); // 超时直接抛出异常，打断搜索
-    }
-}
-
-
-// === 全局宏定义与常量 ===
-#define BOARDWIDTH 9  // 棋盘宽度（9列）
-#define BOARDHEIGHT 10 // 棋盘高度（10行）
-
-// 棋子类型枚举：空、帅/将、相/象、马、车、兵/卒、炮、仕/士
-enum stoneType {None = 0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7};
-// 阵营类型枚举：黑方、红方、空位置
-enum colorType {BLACK=0, RED=1, EMPTY = 2};
-
-int baseLine[2] = {9, 0}; // 黑方和红方的底线y坐标
-char stoneSym[] = "*kbnrpca"; // 棋子类型的字符表示（便于打印调试）
-// 字符到棋子类型的映射字典
-map<char,stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King},
-                               {stoneSym[2], Bishop}, {stoneSym[3], Knight},
-                               {stoneSym[4], Rook}, {stoneSym[5], Pawn},
-                               {stoneSym[6], Cannon}, {stoneSym[7], Assistant}};
-
-// === 移动方向偏移量数组 ===
-int dx[] = {-1,-1,-1,0,0,1,1,1}; // 8个方向的x偏移
-int dy[] = {-1,0,1,-1,1,-1,0,1}; // 8个方向的y偏移
-int dx_ob[] = {-1,1,-1,1};       // 斜向移动（仕）的x偏移
-int dy_ob[] = {-1,-1,1,1};       // 斜向移动（仕）的y偏移
-int dx_strai[] = {-1,0,0,1};     // 直线移动（车、炮、帅）的x偏移
-int dy_strai[] = {0,-1,1,0};     // 直线移动（车、炮、帅）的y偏移
-int dx_lr[] = {-1,1};            // 左右移动（兵过河后）的x偏移
-
-// 马的走法（日字）
-int dx_knight[] = {-2,-2,-1,-1,1,1,2,2};
-int dy_knight[] = {-1,1,-2,2,-2,2,-1,1};
-// 对应的“马腿”位置（用于判断是否撇马腿）
-int dx_knight_foot[] = {-1,-1,0,0,0,0,1,1};
-int dy_knight_foot[] = {0,0,-1,1,-1,1,0,0};
-
-// 象的走法（田字）
-int dx_bishop[] = {-2,-2,2,2};
-int dy_bishop[] = {-2,2,-2,2};
-// 对应的“象眼”位置（用于判断是否塞象眼）
-int dx_bishop_eye[] = {-1,-1,1,1};
-int dy_bishop_eye[] = {-1,1,-1,1};
-
-
-// === 坐标系转换工具函数 ===
-// 将 PGN 格式的列字符 (a-i) 转换为整数 (0-8)
-int pgnchar2int(char c) {
+// PGN字符横坐标转数值
+int pgnchar2int(char c)
+{
     return (int)c - (int)'a';
 }
-char pgnint2char(int i) {
+
+// 数值转PGN字符横坐标
+char pgnint2char(int i)
+{
     return (char)((int)'a' + i);
 }
-// 将数字字符 ('0'-'9') 转换为整数 (0-9)
-int char2int(char c) {
+
+// 字符数字转整型数值
+int char2int(char c)
+{
     return (int)c - (int)'0';
 }
-char int2char(int i) {
+
+// 整型数值转字符数字
+char int2char(int i)
+{
     return (char)((int)'0' + i);
 }
 
-// === 数据结构 ===
+class TimeOutException : public std::runtime_error
+{
+public:
+    TimeOutException() : std::runtime_error("Time limit exceeded") {}
+};
 
-// 表示一步棋的结构体
-struct Move {
-    int source_x, source_y, target_x, target_y; // 起点和终点坐标
-    Move() {source_x = -1; source_y = -1; target_x = -1; target_y = -1;}
-    Move(int msx, int msy, int mtx, int mty): source_x(msx), source_y(msy),
-                                              target_x(mtx), target_y(mty) {;}
-    // 从PGN字符串格式解析移动（例如 "h2", "e2"）
-    Move(string msource, string mtarget) {
+class SearchTime
+{
+private:
+    clock_t startTime;
+    int timeLimit_ms; // 毫秒
+    int checkerCount;
+
+public:
+    SearchTime(int limit_ms = 900) : startTime(0), timeLimit_ms(limit_ms), checkerCount(0) {}
+
+    void setLimitMs(int limit_ms)
+    {
+        timeLimit_ms = limit_ms;
+    }
+
+    void start()
+    {
+        startTime = clock();
+        checkerCount = 0;
+    }
+
+    inline void check()
+    {
+        if (checkerCount++ % 1024 == 0) // 每1024次检查一次时间
+        {
+            clock_t currentTime = clock();
+            double durationTime_ms = double(currentTime - startTime) / CLOCKS_PER_SEC * 1000;
+            if (durationTime_ms > timeLimit_ms)
+            {
+                throw TimeOutException();
+            }
+        }
+    }
+};
+
+struct Move
+{
+    int source_x, source_y, target_x, target_y;
+    Move()
+    {
+        source_x = -1;
+        source_y = -1;
+        target_x = -1;
+        target_y = -1;
+    }
+    Move(int msx, int msy, int mtx, int mty) : source_x(msx), source_y(msy),
+                                               target_x(mtx), target_y(mty) { ; }
+    Move(string msource, string mtarget)
+    {
         source_x = pgnchar2int(msource[0]);
         source_y = char2int(msource[1]);
         target_x = pgnchar2int(mtarget[0]);
         target_y = char2int(mtarget[1]);
     }
-    bool operator ==(const Move& other) const {
-        return source_x == other.source_x && source_y == other.source_y && target_x == other.target_x
-               && target_y == other.target_y;
+    bool operator==(const Move &other) const
+    {
+        return source_x == other.source_x && source_y == other.source_y && target_x == other.target_x && target_y == other.target_y;
+    }
+}; // 描述一步行棋（起点和终点坐标）的数据结构
+
+//？？？如何再考虑使用？
+// MoveNode，根据当前的着棋算出相应的收益，同时可增添其它的数据属性 博弈树上的局面应当是局面节点构成的树，根据局面做估值
+//数学理论上，是根据状态构建博弈树，实际上使用着法节点构成博弈树 —— 避免程序过大的开销
+struct MoveNode
+{
+    Move strategy;
+    int value = -1; //初始值为-1
+    bool operator==(const MoveNode &other)
+    {
+        return (this->strategy) == (other.strategy);
     }
 };
 
-// 表示棋盘上一个格子的结构体
-struct Grid {
-    stoneType type;  // 棋子类型
-    colorType color; // 棋子阵营
-    Grid () : type(None), color(EMPTY) {;}
-    Grid (stoneType mtype, colorType mcolor):
-            type(mtype), color(mcolor) {;}
-    Grid& operator = (const Grid& other) {
-        if (this != &other) {
+struct Grid
+{
+    stoneType type;
+    colorType color;
+    Grid() : type(None), color(EMPTY) { ; }
+    Grid(stoneType mtype, colorType mcolor) : type(mtype), color(mcolor) { ; }
+    Grid &operator=(const Grid &other)
+    {
+        if (this != &other)
+        {
             type = other.type;
             color = other.color;
         }
         return *this;
     }
-    bool operator == (const Grid& other) const {
+    bool operator==(const Grid &other) const
+    {
         return type == other.type && color == other.color;
     }
-};
+}; // 描述棋盘上单个格子（当前包含的棋子类型和颜色）的数据结构
 
-// 象棋核心逻辑类
-class Chess {
+class Chess
+{
+    friend class ChessAI; // ChessAI拥有调用Chess所有方法和属性的权限！
+    friend class EvalRecord; 
 private:
-    std::vector<std::vector<Grid>> state; // 记录历史所有回合的棋盘状态
-    int currTurnId;                       // 当前回合数
-    colorType currColor;                  // 当前走棋方（RED 或 BLACK）
-    vector<int> continuePeaceTurn;        // 连续未吃子回合数（用于判断60回合自然限着和棋）
-    vector<int> lastMoveEaten;            // 记录历史每一步是否吃子
+    std::vector<std::vector<Grid>> state;
+    int currTurnId;
+    colorType currColor;
+    vector<int> continuePeaceTurn;
+    vector<int> lastMoveEaten; //历史每一步是否发生了吃子 0或1
 public:
-    Chess();
-    void resetBoard(); // 初始化开局棋盘
-    // 生成当前局面的所有伪合法走法（mustDefend为true时会过滤掉送将的走法）
-    void generateMoves(vector<Move> &legalMoves, bool mustDefend=true);
-    // 生成走法并过滤掉会导致局面三次重复的走法（防长将/长捉）
-    void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true);
-    bool repeatAfterMove(const Move& move); // 判断走这步棋后是否导致局面重复
-    static bool inBoard(int mx, int my); // 坐标是否在棋盘内
-    static bool inKingArea(int mx, int my, colorType mcolor); // 坐标是否在九宫格内
-    static bool inColorArea(int mx, int my, colorType mcolor); // 坐标是否在本方半场（未过河）
-    colorType oppColor(); // 获取对手颜色
-    colorType oppColor(colorType mcolor);
-    bool isMoveValid(const Move& move, bool mustDefend=true);
-    bool isLegalMove(const Move& move, bool mustDefend=true);
-    bool isLegalMoveWithForbidden(const Move& move, bool mustDefend=true);
-    bool isMoveValidWithForbidden(const Move& move, bool mustDefend=true);
-    bool makeMoveAssumeLegal(const Move& move); // 执行一步棋，并推进游戏状态
-    bool attacked(colorType color, int mx, int my); // 判断(mx, my)是否被 color 方攻击
-    bool betweenIsEmpty(int sx, int sy, int ex, int ey); // 判断两点之间是否为空
-    int betweenNotEmptyNum(int sx, int sy, int ex, int ey); // 计算两点之间有几个棋子（用于炮吃子判断）
-    static bool inSameLine(int sx, int sy, int ex, int ey); 
-    static bool inSameStraightLine(int sx, int sy, int ex, int ey); // 是否在同一水平/垂直线上
-    static bool inSameObiqueLine(int sx, int sy, int ex, int ey); // 是否在同一斜线上
-    bool isMyKingAttackedAfterMove(const Move& move); // 走这步后自己是否被将
-    bool isOppKingAttackedAfterMove(const Move& move); // 走这步后是否将了对手
-    bool currKingAttacked(const Move& move);
-    bool winAfterMove(const Move& move); // 走这步后对手是否绝杀无解
-    void undoMove(); // 悔棋/撤销一步，用于在搜索时回溯状态
-    bool exceedMaxPeaceState(); // 是否达到和棋步数条件
-    
-    colorType getCurrColor() const {
-        return currColor;
-    }
+    Chess();                                                                           // 构造函数，初始化棋盘
+    void resetBoard();                                                                 // 重置棋盘为初始状态
+    void generateMoves(vector<Move> &legalMoves, bool mustDefend = true);              // 生成常规合法移动步
+    void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend = true); // 生成包含禁手规则的合法移动步
+    void generateMoveNodesWithForbidden(vector<MoveNode> &legalNodes, bool mustDefend = true);  //新增————生成合法MoveNode
+    bool repeatAfterMove(const Move &move);                                            // 判断移动后是否出现长将/长捉等重复局面
+    static bool inBoard(int mx, int my);                                               // 判断坐标是否在棋盘内
+    static bool inKingArea(int mx, int my, colorType mcolor);                          // 判断是否在九宫格内
+    static bool inColorArea(int mx, int my, colorType mcolor);                         // 判断是否在己方半场
+    colorType oppColor();                                                              // 获取对手颜色
+    colorType oppColor(colorType mcolor);                                              // 获取指定颜色的对手颜色
+    bool isMoveValid(const Move &move, bool mustDefend = true);                        // 验证移动是否有效
+    bool isLegalMove(const Move &move, bool mustDefend = true);                        // 判断是否为合法移动
+    bool isLegalMoveWithForbidden(const Move &move, bool mustDefend = true);           // 判断包含禁手规则下是否合法
+    bool isMoveValidWithForbidden(const Move &move, bool mustDefend = true);           // 验证包含禁手规则下的移动
+    bool makeMoveAssumeLegal(const Move &move);                                        // 假设合法并执行移动，更新状态
+    bool attacked(colorType color, int mx, int my);                                    // 检查己方将/帅是否被某方颜色攻击
+    bool betweenIsEmpty(int sx, int sy, int ex, int ey);                               // 判断两点之间是否没有棋子
+    int betweenNotEmptyNum(int sx, int sy, int ex, int ey);                            // 计算两点之间非空棋子的数量
+    static bool inSameLine(int sx, int sy, int ex, int ey);                            // 判断两点是否在同一直线或对角线
+    static bool inSameStraightLine(int sx, int sy, int ex, int ey);                    // 判断两点是否在同行或同列
+    static bool inSameObiqueLine(int sx, int sy, int ex, int ey);                      // 判断两点是否在同斜线
+    bool isMyKingAttackedAfterMove(const Move &move);                                  // 判断移动后己方主帅是否被将军
+    bool isOppKingAttackedAfterMove(const Move &move);                                 // 判断移动后是否将对手的军
+    bool currKingAttacked(const Move &move);                                           // 判断当前主帅是否正在被攻击
+    bool winAfterMove(const Move &move);                                               // 判断该移动是否能直接获胜
+    void undoMove();                                                                   // 撤销上一步移动
+    bool exceedMaxPeaceState();                                                        // 判断是否超过最大求和/平局步数
+    static int xy2pos(int mx, int my);                                                 // 二维坐标转一维索引
+    static int pos2x(int mpos);                                                        // 一维索引转X坐标
+    static int pos2y(int mpos);                                                        // 一维索引转Y坐标
+    void printBoard();                                                                 // 打印当前棋盘
 
-    // 一维数组和二维坐标的互相转换
-    static int xy2pos(int mx, int my);
-    static int pos2x(int mpos);
-    static int pos2y(int mpos);
-    void printBoard(); // 打印棋盘
+    bool isattacked(colorType color, int mx, int my);
 };
 
-// Botzone 平台 IO 接口
-void getInputBotzone(Chess& chess);
-void giveOutputBotzone(Chess& chess);
+//局面评估类 包含评估的各个指标量(特征提取)和评估方法 
+class EvalRecord{
+public:
+    Chess *board; //评估类含有的Chess指针，用于调用Chess中的方法
+    void copyBoard(Chess *currentBoard) { board = currentBoard; } //
 
-int main() {
+    int GridControl[2][90];  //红 / 黑方在9*10棋盘上控制的 点数(红:0 黑:1)
+    bool havecontrol[90];    //所控制的点上，有对方的棋子为true
+
+    bool isKingattacked;
+    vector<Grid> curstones;
+    vector<bool> curattacked;
+    
+    bool isattacked(colorType color, int mx, int my);                          //(对方的棋子颜色，我方的棋子位置x y) 某一方方位于mx my点的棋子是否可能被吃
+    bool hasattackchance(int mx,int my);                                       //当前位于x y处的棋子是否有吃子的可能
+    bool ismiddlecompostion(vector<Grid>& target);                             //是否为中局 / 残局
+    int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
+    int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
+    int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
+    int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
+
+    
+    EvalRecord() : board(nullptr), isKingattacked(false) {}
+};
+
+//产生策略类
+class ChessAI
+{
+public:
+    // ChessAI属性 —— 由棋局状态 、 评估结构体组成
+    Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
+    EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
+    
+    vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
+    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分~
+    vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
+    vector<MoveNode> select;      //经过处理后的Move方法
+    SearchTime searchTime;          // 搜索计时器
+
+    // ChessAI方法
+    bool getWin();                                                            //更新isWin,判断是否胜利
+    void getcurstones(void);
+    void generateMovesWithForbidden();                                        //对应board的同名方法
+    void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
+    int alpha_beta_search();                                                  //alpha-beta剪枝，获得最佳得分
+    void fillinMoveNodes(vector<MoveNode>& nodes);                            //将博弈树的MoveNodes节点进行赋值，并排序
+    void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target, int depthHint); //对某层的MoveNodes节点从target填充并排序
+    int fast_move_heuristic(const Move& mv);                                  //深层轻量排序启发值
+    void MoveNodesort(vector<MoveNode>& nodes);                               //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeFront(MoveNode& tmpmove);                                    //(用于博弈树的向下遍历) ———— 进行当前的着法 
+    //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
+    void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
+    
+    //将搜索入口和搜索体相互剥离
+    void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
+    int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
+    void alpha_beta_PVS_select(vector<MoveNode>& selected);                   //alpha_beta_PMV 搜索入口
+    int alpha_beta_PVS_search(int depth,int alpha,int beta);                      //alpha_beta_PMV 搜索函数
+    bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
+    bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
+
+    ChessAI();
+    ~ChessAI();
+};
+void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
+void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
+
+int main()
+{
     Chess chess;
-    getInputBotzone(chess); // 读取 Botzone 传入的对局历史记录
-    giveOutputBotzone(chess); // 生成走法并输出给 Botzone
+    getInputBotzone(chess);
+    giveOutputBotzone(chess);
     return 0;
 }
 
-// 输出给 Botzone 平台
-void giveOutputBotzone(Chess& chess) {
+// 向Botzone平台输出落子的函数定义
+void giveOutputBotzone(Chess &chess)
+{
     vector<Move> retMoves;
-    chess.generateMovesWithForbidden(retMoves); // 生成所有合法且不禁手的走法
+    chess.generateMovesWithForbidden(retMoves);
     Json::Value ret;
 
-    if (retMoves.empty()) {
-        // 如果没有合法走法，认输
+    if (retMoves.empty())
+    {
         ret["response"]["source"] = string("-1");
         ret["response"]["target"] = string("-1");
-    } else {
-        // AI 核心：随机选择一步合法走法（注：若要实现智能AI，需将此处替换为极小化极大搜索 Minimax 算法）
+    }
+    else
+    {
         srand(time(nullptr));
         int choice = rand() % retMoves.size();
         auto selMove = retMoves[choice];
@@ -215,29 +330,29 @@ void giveOutputBotzone(Chess& chess) {
     cout << writer.write(ret) << endl;
 }
 
-// 从 Botzone 读取 JSON 格式输入
-void getInputBotzone(Chess& chess) {
+// 解析Botzone平台输入以更新棋局状态的函数定义
+void getInputBotzone(Chess &chess)
+{
     string str;
     getline(cin, str);
     Json::Reader reader;
     Json::Value input;
     reader.parse(str, input);
     int turnID = input["responses"].size();
-    
     // 第一回合收到的起点是"-1", 说明我是红方
     colorType currBotColor =
-            input["requests"][(Json::Value::UInt) 0]["source"].asString() == "-1" ?  RED : BLACK;
+        input["requests"][(Json::Value::UInt)0]["source"].asString() == "-1" ? RED : BLACK;
     string curSource, curTarget;
-    
-    // 重演历史记录，将棋盘推进到当前局面
     for (int i = 0; i < turnID; i++)
     {
         // 根据这些输入输出逐渐恢复状态到当前回合
         curSource = input["requests"][i]["source"].asString();
         curTarget = input["requests"][i]["target"].asString();
-        if (curSource != "-1") {
+        if (curSource != "-1")
+        {
             Move curMove(curSource, curTarget);
-            if (!chess.isMoveValidWithForbidden(curMove)) {
+            if (!chess.isMoveValidWithForbidden(curMove))
+            {
                 throw std::runtime_error("input is not valid!");
             }
             chess.makeMoveAssumeLegal(curMove);
@@ -246,7 +361,8 @@ void getInputBotzone(Chess& chess) {
         curSource = input["responses"][i]["source"].asString();
         curTarget = input["responses"][i]["target"].asString();
         Move curMove(curSource, curTarget);
-        if (!chess.isMoveValidWithForbidden(curMove)) {
+        if (!chess.isMoveValidWithForbidden(curMove))
+        {
             throw std::runtime_error("input is not valid!");
         }
         chess.makeMoveAssumeLegal(curMove);
@@ -254,26 +370,30 @@ void getInputBotzone(Chess& chess) {
 
     curSource = input["requests"][turnID]["source"].asString();
     curTarget = input["requests"][turnID]["target"].asString();
-    if (curSource != "-1") {
+    if (curSource != "-1")
+    {
         Move curMove(curSource, curTarget);
-        if (!chess.isMoveValidWithForbidden(curMove)) {
+        if (!chess.isMoveValidWithForbidden(curMove))
+        {
             throw std::runtime_error("input is not valid!");
         }
         chess.makeMoveAssumeLegal(curMove);
     }
 }
 
-// 初始化中国象棋标准开局阵型
-void Chess::resetBoard() {
+// 重置棋盘状态为初始状态的函数定义
+void Chess::resetBoard()
+{
     vector<Grid> currState;
     Grid boardInfo[BOARDWIDTH][BOARDHEIGHT];
-    for (int x = 0; x < BOARDWIDTH; x++) {
-        for (int y = 0; y < BOARDHEIGHT; y++) {
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
             boardInfo[x][y] = Grid(None, EMPTY);
         }
     }
 
-    // 摆放红方棋子 (底线在 y=0)
     boardInfo[0][0] = Grid(Rook, RED);
     boardInfo[1][0] = Grid(Knight, RED);
     boardInfo[2][0] = Grid(Bishop, RED);
@@ -291,7 +411,6 @@ void Chess::resetBoard() {
     boardInfo[6][3] = Grid(Pawn, RED);
     boardInfo[8][3] = Grid(Pawn, RED);
 
-    // 摆放黑方棋子 (底线在 y=9)
     boardInfo[0][9] = Grid(Rook, BLACK);
     boardInfo[1][9] = Grid(Knight, BLACK);
     boardInfo[2][9] = Grid(Bishop, BLACK);
@@ -309,468 +428,603 @@ void Chess::resetBoard() {
     boardInfo[6][6] = Grid(Pawn, BLACK);
     boardInfo[8][6] = Grid(Pawn, BLACK);
 
-    for (int mpos = 0; mpos < BOARDWIDTH * BOARDHEIGHT; mpos++) {
+    for (int mpos = 0; mpos < BOARDWIDTH * BOARDHEIGHT; mpos++)
+    {
         currState.push_back(boardInfo[pos2x(mpos)][pos2y(mpos)]);
     }
     state.clear();
     state.push_back(currState);
 }
 
-// 构造函数
-Chess::Chess() {
+// Chess类构造函数的定义
+Chess::Chess()
+{
     resetBoard();
     continuePeaceTurn.clear();
     lastMoveEaten.clear();
     continuePeaceTurn.push_back(0);
     lastMoveEaten.push_back(false);
-    currColor = RED; // 红方先走
+    currColor = RED;
     currTurnId = 0;
 }
 
-// 核心函数：根据当前局面生成当前方所有的合法移动
-void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend) {
+// 生成当前所有伪合法或合法步的函数定义
+void Chess::generateMoves(vector<Move> &legalMoves, bool mustDefend)
+{
     legalMoves.clear();
-    for (int x = 0; x < BOARDWIDTH; x++) {
-        for (int y = 0; y < BOARDHEIGHT; y++) {
-            auto& curGrid = state[currTurnId][xy2pos(x, y)];
-            if (curGrid.color == currColor) {
-                // 根据不同兵种进行规则判断
-                switch (curGrid.type) {
-                    case King: { // 帅/将
-                        for (int dir = 0; dir < 4; dir++) {
-                            int tx = x + dx_strai[dir];
-                            int ty = y + dy_strai[dir];
-                            if (!inKingArea(tx, ty, curGrid.color)) { // 必须在九宫格内
-                                continue;
-                            }
-                            auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                            if (tGrid.color == currColor) // 目标不能是自己人
-                                continue;
-                            if (mustDefend) { // 判断走完这步是否会处于被将军状态（送将）
-                                if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                    legalMoves.emplace_back(x, y, tx, ty);
-                                }
-                            } else {
-                                legalMoves.emplace_back(x, y, tx, ty);
-                            }
-                        }
-                        break;
-                    }
-                    case Assistant: { // 仕/士
-                        for (int dir = 0; dir < 4; dir++) {
-                            int tx = x + dx_ob[dir], ty = y + dy_ob[dir];
-                            if (!inKingArea(tx, ty, curGrid.color)) { // 必须在九宫内且走斜线
-                                continue;
-                            }
-                            auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                            if (tGrid.color == currColor) {
-                                continue;
-                            }
-                            if (mustDefend) {
-                                if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                    legalMoves.emplace_back(x, y, tx, ty);
-                                }
-                            } else {
-                                legalMoves.emplace_back(x, y, tx, ty);
-                            }
-                        }
-                        break;
-                    }
-                    case Pawn: { // 兵/卒
-                        int forwardOne = (curGrid.color == RED ? 1 : -1); // 兵的前进方向
-                        bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5)); // 是否过河
-                        int tx = x, ty = y + forwardOne;
-                        
-                        // 1. 向前走
-                        if (!inBoard(tx, ty)) {
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
+            auto &curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == currColor)
+            {
+                switch (curGrid.type)
+                {
+                case King:
+                {
+                    for (int dir = 0; dir < 4; dir++)
+                    {
+                        int tx = x + dx_strai[dir];
+                        int ty = y + dy_strai[dir];
+                        if (!inKingArea(tx, ty, curGrid.color))
+                        {
                             continue;
                         }
-                        auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                        if (tGrid.color == currColor) {
+                        auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                        if (tGrid.color == currColor)
                             continue;
-                        }
-                        if (mustDefend) {
-                            if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
+                        if (mustDefend)
+                        {
+                            if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                            {
                                 legalMoves.emplace_back(x, y, tx, ty);
                             }
-                        } else {
+                        }
+                        else
+                        {
                             legalMoves.emplace_back(x, y, tx, ty);
                         }
-                        
-                        // 2. 如果过河了，还可以向左右走
-                        if (crossMidLine) {
-                            for (int dir = 0; dir < 2; dir++) {
-                                int ox = x + dx_lr[dir], oy = y;
-                                if (!inBoard(ox, oy)) {
-                                    continue;
-                                }
-                                auto& oGrid = state[currTurnId][xy2pos(ox, oy)];
-                                if (oGrid.color == currColor) {
-                                    continue;
-                                }
-                                if (mustDefend) {
-                                    if (!isMyKingAttackedAfterMove(Move(x,y,ox,oy))) {
-                                        legalMoves.emplace_back(x, y, ox, oy);
-                                    }
-                                } else {
+                    }
+                    break;
+                }
+                case Assistant:
+                {
+                    for (int dir = 0; dir < 4; dir++)
+                    {
+                        int tx = x + dx_ob[dir], ty = y + dy_ob[dir];
+                        if (!inKingArea(tx, ty, curGrid.color))
+                        {
+                            continue;
+                        }
+                        auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                        if (tGrid.color == currColor)
+                        {
+                            continue;
+                        }
+                        if (mustDefend)
+                        {
+                            if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                            {
+                                legalMoves.emplace_back(x, y, tx, ty);
+                            }
+                        }
+                        else
+                        {
+                            legalMoves.emplace_back(x, y, tx, ty);
+                        }
+                    }
+                    break;
+                }
+                case Pawn:
+                {
+                    int forwardOne = (curGrid.color == RED ? 1 : -1);
+                    bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
+                    int tx = x, ty = y + forwardOne;
+                    if (!inBoard(tx, ty))
+                    {
+                        continue;
+                    }
+                    auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                    if (tGrid.color == currColor)
+                    {
+                        continue;
+                    }
+                    if (mustDefend)
+                    {
+                        if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                        {
+                            legalMoves.emplace_back(x, y, tx, ty);
+                        }
+                    }
+                    else
+                    {
+                        legalMoves.emplace_back(x, y, tx, ty);
+                    }
+                    if (crossMidLine)
+                    {
+                        for (int dir = 0; dir < 2; dir++)
+                        {
+                            int ox = x + dx_lr[dir], oy = y;
+                            if (!inBoard(ox, oy))
+                            {
+                                continue;
+                            }
+                            auto &oGrid = state[currTurnId][xy2pos(ox, oy)];
+                            if (oGrid.color == currColor)
+                            {
+                                continue;
+                            }
+                            if (mustDefend)
+                            {
+                                if (!isMyKingAttackedAfterMove(Move(x, y, ox, oy)))
+                                {
                                     legalMoves.emplace_back(x, y, ox, oy);
                                 }
                             }
+                            else
+                            {
+                                legalMoves.emplace_back(x, y, ox, oy);
+                            }
                         }
-                        break;
                     }
-                    case Knight: { // 马
-                        for (int dir = 0; dir < 8; dir++) { // 8个“日”字对角
-                            int tx = x + dx_knight[dir], ty = y + dy_knight[dir];
-                            if (!inBoard(tx, ty)) {
-                                continue;
-                            }
-                            auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                            int fx = x + dx_knight_foot[dir], fy = y + dy_knight_foot[dir];
-                            auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
-                            
-                            // 规则：目标位置不能是己方棋子，且“马腿”位置不能为空（不能撇马腿）
-                            if (tGrid.color == currColor || fGrid.color != EMPTY) {
-                                continue;
-                            }
-                            if (mustDefend) {
-                                if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                    legalMoves.emplace_back(x, y, tx, ty);
-                                }
-                            } else {
+                    break;
+                }
+                case Knight:
+                {
+                    for (int dir = 0; dir < 8; dir++)
+                    {
+                        int tx = x + dx_knight[dir], ty = y + dy_knight[dir];
+                        if (!inBoard(tx, ty))
+                        {
+                            continue;
+                        }
+                        auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                        int fx = x + dx_knight_foot[dir], fy = y + dy_knight_foot[dir];
+                        auto &fGrid = state[currTurnId][xy2pos(fx, fy)];
+                        if (tGrid.color == currColor || fGrid.color != EMPTY)
+                        {
+                            continue;
+                        }
+                        if (mustDefend)
+                        {
+                            if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                            {
                                 legalMoves.emplace_back(x, y, tx, ty);
                             }
                         }
-                        break;
+                        else
+                        {
+                            legalMoves.emplace_back(x, y, tx, ty);
+                        }
                     }
-                    case Bishop: { // 相/象
-                        for (int dir = 0; dir < 4; dir++) { // 4个“田”字对角
-                            int tx = x + dx_bishop[dir], ty = y + dy_bishop[dir];
-                            // 象不能过河
-                            if (!inBoard(tx, ty) || !inColorArea(tx, ty, currColor)) {
-                                continue;
-                            }
-                            int ex = x + dx_bishop_eye[dir], ey = y + dy_bishop_eye[dir];
-                            auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                            auto& eGrid = state[currTurnId][xy2pos(ex, ey)];
-                            
-                            // 规则：目标位置不能是己方棋子，且“象眼”位置不能为空（不能塞象眼）
-                            if (tGrid.color == currColor || eGrid.color != EMPTY) {
-                                continue;
-                            }
-                            if (mustDefend) {
-                                if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                    legalMoves.emplace_back(x, y, tx, ty);
-                                }
-                            } else {
+                    break;
+                }
+                case Bishop:
+                {
+                    for (int dir = 0; dir < 4; dir++)
+                    {
+                        int tx = x + dx_bishop[dir], ty = y + dy_bishop[dir];
+                        if (!inBoard(tx, ty) || !inColorArea(tx, ty, currColor))
+                        {
+                            continue;
+                        }
+                        int ex = x + dx_bishop_eye[dir], ey = y + dy_bishop_eye[dir];
+                        auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                        auto &eGrid = state[currTurnId][xy2pos(ex, ey)];
+                        if (tGrid.color == currColor || eGrid.color != EMPTY)
+                        {
+                            continue;
+                        }
+                        if (mustDefend)
+                        {
+                            if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                            {
                                 legalMoves.emplace_back(x, y, tx, ty);
                             }
                         }
-                        break;
+                        else
+                        {
+                            legalMoves.emplace_back(x, y, tx, ty);
+                        }
                     }
-                    case Rook: { // 车
-                        for (int dir = 0; dir < 4; dir++) { // 上下左右
-                            int tx = x + dx_strai[dir];
-                            int ty = y + dy_strai[dir];
-                            // 射线扫描：一直走直到碰到边界或棋子
-                            while (inBoard(tx, ty)) {
-                                auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                                if (tGrid.color == currColor) { // 遇到己方棋子，路线受阻
-                                    break;
-                                } else if (tGrid.color == oppColor()) { // 遇到敌方棋子，可以吃掉，但不能再继续走了
-                                    if (mustDefend) {
-                                        if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                            legalMoves.emplace_back(x, y, tx, ty);
-                                        }
-                                    } else {
-                                        legalMoves.emplace_back(x, y, tx, ty);
-                                    }
-                                    break;
-                                } else { // 遇到空格，可以走
-                                    assert(tGrid.color == EMPTY);
-                                    if (mustDefend) {
-                                        if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                            legalMoves.emplace_back(x, y, tx, ty);
-                                        }
-                                    } else {
+                    break;
+                }
+                case Rook:
+                {
+                    for (int dir = 0; dir < 4; dir++)
+                    {
+                        int tx = x + dx_strai[dir];
+                        int ty = y + dy_strai[dir];
+                        while (inBoard(tx, ty))
+                        {
+                            auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                            if (tGrid.color == currColor)
+                            {
+                                break;
+                            }
+                            else if (tGrid.color == oppColor())
+                            {
+                                if (mustDefend)
+                                {
+                                    if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                                    {
                                         legalMoves.emplace_back(x, y, tx, ty);
                                     }
                                 }
-                                tx += dx_strai[dir];
-                                ty += dy_strai[dir];
+                                else
+                                {
+                                    legalMoves.emplace_back(x, y, tx, ty);
+                                }
+                                break;
                             }
-                        }
-                        break;
-                    }
-                    case Cannon: { // 炮
-                        for (int dir = 0; dir < 4; dir++) { // 上下左右
-                            int tx = x + dx_strai[dir];
-                            int ty = y + dy_strai[dir];
-                            while (inBoard(tx, ty)) {
-                                int betweenNum = betweenNotEmptyNum(x, y, tx, ty); // 获取两点之间的棋子数
-                                if (betweenNum > 1) { // 如果中间隔了2个及以上，无法跨越
-                                    break;
-                                } else if (betweenNum == 1) { // 中间隔了1个（作为炮架）
-                                    auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                                    // 必须是吃子，目标不能是己方或空
-                                    if (tGrid.color == currColor || tGrid.color == EMPTY) {
-                                        tx += dx_strai[dir];
-                                        ty += dy_strai[dir];
-                                        continue;
-                                    }
-                                    if (mustDefend) {
-                                        if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                            legalMoves.emplace_back(x, y, tx, ty);
-                                        }
-                                    } else {
-                                        legalMoves.emplace_back(x, y, tx, ty);
-                                    }
-                                } else if (betweenNum == 0) { // 中间没有棋子，视为移动（不能吃子）
-                                    auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-                                    if (tGrid.color != EMPTY) { // 遇到棋子且中间没有炮架，无法吃，跳过
-                                        tx += dx_strai[dir];
-                                        ty += dy_strai[dir];
-                                        continue;
-                                    }
-                                    if (mustDefend) {
-                                        if (!isMyKingAttackedAfterMove(Move(x,y,tx,ty))) {
-                                            legalMoves.emplace_back(x, y, tx, ty);
-                                        }
-                                    } else {
+                            else
+                            {
+                                assert(tGrid.color == EMPTY);
+                                if (mustDefend)
+                                {
+                                    if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                                    {
                                         legalMoves.emplace_back(x, y, tx, ty);
                                     }
                                 }
-                                tx += dx_strai[dir];
-                                ty += dy_strai[dir];
+                                else
+                                {
+                                    legalMoves.emplace_back(x, y, tx, ty);
+                                }
                             }
+                            tx += dx_strai[dir];
+                            ty += dy_strai[dir];
                         }
-                        break;
                     }
-                    case None:
-                        throw std::runtime_error("color is not empty but type is none");
+                    break;
+                }
+                case Cannon:
+                {
+                    for (int dir = 0; dir < 4; dir++)
+                    {
+                        int tx = x + dx_strai[dir];
+                        int ty = y + dy_strai[dir];
+                        while (inBoard(tx, ty))
+                        {
+                            int betweenNum = betweenNotEmptyNum(x, y, tx, ty);
+                            if (betweenNum > 1)
+                            {
+                                break;
+                            }
+                            else if (betweenNum == 1)
+                            {
+                                auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                                if (tGrid.color == currColor || tGrid.color == EMPTY)
+                                {
+                                    tx += dx_strai[dir];
+                                    ty += dy_strai[dir];
+                                    continue;
+                                }
+                                if (mustDefend)
+                                {
+                                    if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                                    {
+                                        legalMoves.emplace_back(x, y, tx, ty);
+                                    }
+                                }
+                                else
+                                {
+                                    legalMoves.emplace_back(x, y, tx, ty);
+                                }
+                            }
+                            else if (betweenNum == 0)
+                            {
+                                auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+                                if (tGrid.color != EMPTY)
+                                {
+                                    tx += dx_strai[dir];
+                                    ty += dy_strai[dir];
+                                    continue;
+                                }
+                                if (mustDefend)
+                                {
+                                    if (!isMyKingAttackedAfterMove(Move(x, y, tx, ty)))
+                                    {
+                                        legalMoves.emplace_back(x, y, tx, ty);
+                                    }
+                                }
+                                else
+                                {
+                                    legalMoves.emplace_back(x, y, tx, ty);
+                                }
+                            }
+                            tx += dx_strai[dir];
+                            ty += dy_strai[dir];
+                        }
+                    }
+                    break;
+                }
+                case None:
+                    throw std::runtime_error("color is not empty but type is none");
                 }
             }
         }
     }
 }
 
-// === 辅助逻辑和检查 ===
-bool Chess::inBoard(int mx, int my) {
+// 判断给定坐标是否位于棋盘内的函数定义
+bool Chess::inBoard(int mx, int my)
+{
     return mx >= 0 && mx < BOARDWIDTH && my >= 0 && my < BOARDHEIGHT;
 }
 
-colorType Chess::oppColor() {
+// 返回当前行动方对手颜色的函数定义
+colorType Chess::oppColor()
+{
     return currColor == BLACK ? RED : BLACK;
 }
 
-bool Chess::isLegalMove(const Move &move, bool mustDefend) {
+// 判断给定移动是否为合法步的函数定义
+bool Chess::isLegalMove(const Move &move, bool mustDefend)
+{
     vector<Move> currLegalMoves;
     generateMoves(currLegalMoves, mustDefend);
     auto fi_iter = std::find(currLegalMoves.begin(), currLegalMoves.end(), move);
     return fi_iter != currLegalMoves.end();
 }
 
-// 模拟执行一步棋，更新所有的游戏状态信息
-bool Chess::makeMoveAssumeLegal(const Move &move) {
-    int nextPeaceTrun =  continuePeaceTurn[currTurnId] + 1;
+// 在假设移动合法的前提下执行该移动，更新棋盘状态的函数定义
+bool Chess::makeMoveAssumeLegal(const Move &move)
+{
+    int nextPeaceTrun = continuePeaceTurn[currTurnId] + 1;
     vector<Grid> copyState = state[currTurnId];
     state.push_back(copyState);
     currTurnId++;
 
-    auto& sourceGrid = state[currTurnId][xy2pos(move.source_x, move.source_y)];
-    auto& targetGrid = state[currTurnId][xy2pos(move.target_x, move.target_y)];
-    if (targetGrid.color == oppColor()) { // 判断是否吃子
-        nextPeaceTrun = 0; // 吃子重置连续和棋步数
+    auto &sourceGrid = state[currTurnId][xy2pos(move.source_x, move.source_y)];
+    auto &targetGrid = state[currTurnId][xy2pos(move.target_x, move.target_y)];
+    if (targetGrid.color == oppColor())
+    {
+        nextPeaceTrun = 0;
         lastMoveEaten.push_back(true);
-    } else {
+    }
+    else
+    {
         lastMoveEaten.push_back(false);
     }
-    
-    // 覆盖目标位置
     targetGrid.type = sourceGrid.type;
     targetGrid.color = sourceGrid.color;
     assert(sourceGrid.color == currColor);
 
-    // 清空起始位置
     sourceGrid.color = EMPTY;
     sourceGrid.type = None;
 
     continuePeaceTurn.push_back(nextPeaceTrun);
-    currColor = oppColor(); // 交换回合方
+    currColor = oppColor();
     return true;
 }
 
-// 检查某个特定点 (mx, my) 是否被特定颜色 color 攻击
-// 常用于判断帅/将是否处于被将军状态
-bool Chess::attacked(colorType color, int mx, int my) {
-    for (int x = 0; x < BOARDWIDTH; x++) {
-        for (int y = 0; y < BOARDHEIGHT; y++) {
-            auto& curGrid = state[currTurnId][xy2pos(x, y)];
-            if (curGrid.color != color) {
+// 判断将/帅在指定位置是否受特定颜色棋子攻击的函数定义
+// 对方的颜色 自身的将/帅位置
+bool Chess::attacked(colorType color, int mx, int my)
+{
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
+            auto &curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color != color)
+            {
                 continue;
             }
             int dex = mx - x, dey = my - y;
-            switch (curGrid.type) {
-                case King: { // 面对面（飞将）
-                    if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my)) {
+            switch (curGrid.type)
+            {
+            case King:
+            {
+                if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my))
+                {
+                    return true;
+                }
+                break;
+            }
+            case Assistant:
+            {
+                if (inKingArea(mx, my, oppColor(color)))
+                {
+                    if (abs(dex) == 1 && abs(dey) == 1)
+                    {
                         return true;
                     }
-                    break;
                 }
-                case Assistant: {
-                    if (inKingArea(mx, my, oppColor(color))) {
-                        if (abs(dex) == 1 && abs(dey) == 1) {
-                            return true;
-                        }
-                    }
-                    break;
-                }
-                case Knight: { // 马
-                    if (abs(dex) == 2 && abs(dey) == 1) {
-                        int fx = x + (dex > 0 ? 1 : -1), fy = y;
-                        auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
-                        if (fGrid.color == EMPTY) {
-                            return true;
-                        }
-                    } else if (abs(dex) == 1 && abs(dey) == 2) {
-                        int fx = x, fy = y + (dey > 0 ? 1 : -1);
-                        auto& fGrid = state[currTurnId][xy2pos(fx, fy)];
-                        if (fGrid.color == EMPTY) {
-                            return true;
-                        }
-                    }
-                    break;
-                }
-                case Bishop: { // 象
-                    if (abs(dex) == 2 && abs(dey) == 2) {
-                        int ex = x + dex / 2, ey = y + dey / 2;
-                        auto& eGrid = state[currTurnId][xy2pos(ex, ey)];
-                        if (eGrid.color == EMPTY) {
-                            return true;
-                        }
-                    }
-                    break;
-                }
-                case Rook: { // 车
-                    if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my)) {
+                break;
+            }
+            case Knight:
+            {
+                if (abs(dex) == 2 && abs(dey) == 1)
+                {
+                    int fx = x + (dex > 0 ? 1 : -1), fy = y;
+                    auto &fGrid = state[currTurnId][xy2pos(fx, fy)];
+                    if (fGrid.color == EMPTY)
+                    {
                         return true;
                     }
-                    break;
                 }
-                case Pawn: { // 兵
-                    int forwardOne = (curGrid.color == RED ? 1 : -1);
-                    bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
-                    if (dex == 0 && dey == forwardOne) {
+                else if (abs(dex) == 1 && abs(dey) == 2)
+                {
+                    int fx = x, fy = y + (dey > 0 ? 1 : -1);
+                    auto &fGrid = state[currTurnId][xy2pos(fx, fy)];
+                    if (fGrid.color == EMPTY)
+                    {
                         return true;
                     }
-                    if (crossMidLine && (abs(dex) == 1 && dey == 0)) {
+                }
+                break;
+            }
+            case Bishop:
+            {
+                if (abs(dex) == 2 && abs(dey) == 2)
+                {
+                    int ex = x + dex / 2, ey = y + dey / 2;
+                    auto &eGrid = state[currTurnId][xy2pos(ex, ey)];
+                    if (eGrid.color == EMPTY)
+                    {
                         return true;
                     }
-                    break;
                 }
-                case Cannon: { // 炮
-                    if (inSameStraightLine(x, y, mx, my) && betweenNotEmptyNum(x,y,mx,my) == 1) {
-                        return true;
-                    }
-                    break;
+                break;
+            }
+            case Rook:
+            {
+                if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my))
+                {
+                    return true;
                 }
-                case None: {
-                    throw std::runtime_error("color is not empty but type is none");
-                    break;
+                break;
+            }
+            case Pawn:
+            {
+                int forwardOne = (curGrid.color == RED ? 1 : -1);
+                bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
+                if (dex == 0 && dey == forwardOne)
+                {
+                    return true;
                 }
+                if (crossMidLine && (abs(dex) == 1 && dey == 0))
+                {
+                    return true;
+                }
+                break;
+            }
+            case Cannon:
+            {
+                if (inSameStraightLine(x, y, mx, my) && betweenNotEmptyNum(x, y, mx, my) == 1)
+                {
+                    return true;
+                }
+                break;
+            }
+            case None:
+            {
+                throw std::runtime_error("color is not empty but type is none");
+                break;
+            }
             }
         }
     }
     return false;
 }
 
-// 检查两点是否处在直线上并且中间为空
-bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey) {
+// 判断两坐标点之间是否无任何棋子的函数定义
+bool Chess::betweenIsEmpty(int sx, int sy, int ex, int ey)
+{
     assert(inSameStraightLine(sx, sy, ex, ey));
     int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
     int dey = ey > sy ? 1 : (ey == sy ? 0 : -1);
     int tx = sx + dex, ty = sy + dey;
-    while (inBoard(tx, ty) && !(tx == ex && ty == ey)) {
-        auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
+    while (inBoard(tx, ty) && !(tx == ex && ty == ey))
+    {
+        auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
         if (tGrid.color != EMPTY)
             return false;
-        tx += dex; ty += dey;
+        tx += dex;
+        ty += dey;
     }
     return true;
 }
 
-bool Chess::inSameLine(int sx, int sy, int ex, int ey) {
+// 判断两坐标点是否处于同一横线、竖线或对角线的函数定义
+bool Chess::inSameLine(int sx, int sy, int ex, int ey)
+{
     int dex = ex - sx, dey = ey - sy;
     return dex == dey || dex == -dey || dex == 0 || dey == 0;
 }
 
-bool Chess::inSameStraightLine(int sx, int sy, int ex, int ey) {
+// 判断两坐标点是否处于同一横线或竖线的函数定义
+bool Chess::inSameStraightLine(int sx, int sy, int ex, int ey)
+{
     int dex = ex - sx, dey = ey - sy;
     return dex == 0 || dey == 0;
 }
 
-bool Chess::inSameObiqueLine(int sx, int sy, int ex, int ey) {
+// 判断两坐标点是否处于同一对角线的函数定义
+bool Chess::inSameObiqueLine(int sx, int sy, int ex, int ey)
+{
     int dex = ex - sx, dey = ey - sy;
     return dex == dey || dex == -dey;
 }
 
-// 假设走了这步棋后，己方的将是否被攻击（用于排除“送将”违规步）
-bool Chess::isMyKingAttackedAfterMove(const Move &move) {
+// 判断执行某步移动后，己方主帅是否处于被攻击状态的函数定义
+bool Chess::isMyKingAttackedAfterMove(const Move &move)
+{
     colorType originColor = currColor;
     makeMoveAssumeLegal(move);
     int kingX = -1, kingY = -1;
-    // 寻找己方将的位置
-    for (int x = 0; x < BOARDWIDTH; x++) {
-        for (int y = 0; y < BOARDHEIGHT; y++) {
-            auto& curGrid = state[currTurnId][xy2pos(x, y)];
-            if (curGrid.color == originColor && curGrid.type == King) {
-                kingX = x; kingY = y;
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
+            auto &curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == originColor && curGrid.type == King)
+            {
+                kingX = x;
+                kingY = y;
                 break;
             }
         }
     }
     bool myKingStillAttacked = attacked(oppColor(originColor), kingX, kingY);
-    undoMove(); // 检查完后回溯状态
+    undoMove();
     assert(currColor == originColor);
     return myKingStillAttacked;
 }
 
-bool Chess::isMoveValid(const Move& move, bool mustDefend) {
+// 综合验证移动是否有效的函数定义
+bool Chess::isMoveValid(const Move &move, bool mustDefend)
+{
     return isLegalMove(move, mustDefend);
 }
 
-// 绝杀检测：走完这步后对手是否再无合法招法
-bool Chess::winAfterMove(const Move &move) {
+// 评估某步移动之后是否能造成对方无路可走(获胜)的函数定义
+bool Chess::winAfterMove(const Move &move)
+{
     makeMoveAssumeLegal(move);
     vector<Move> oppLegalMoves;
-    generateMoves(oppLegalMoves); // 生成对手的合法移动
+    generateMoves(oppLegalMoves);
     undoMove();
-    return oppLegalMoves.empty(); // 如果为空，表示绝杀
+    return oppLegalMoves.empty();
 }
 
-// 当前将/帅是否正在被攻击（被将军）
-bool Chess::currKingAttacked(const Move &move) {
+// 判断当前行动方主帅是否正处于被攻击状态的函数定义
+bool Chess::currKingAttacked(const Move &move)
+{
     int kingX = -1, kingY = -1;
-    for (int x = 0; x < BOARDWIDTH; x++) {
-        for (int y = 0; y < BOARDHEIGHT; y++) {
-            auto& curGrid = state[currTurnId][xy2pos(x, y)];
-            if (curGrid.color == currColor && curGrid.type == King) {
-                kingX = x; kingY = y;
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
+            auto &curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == currColor && curGrid.type == King)
+            {
+                kingX = x;
+                kingY = y;
             }
         }
     }
     return attacked(oppColor(), kingX, kingY);
 }
 
-bool Chess::isOppKingAttackedAfterMove(const Move &move) {
+// 评估执行某步移动后是否对敌方主帅造成攻击(将军)的函数定义
+bool Chess::isOppKingAttackedAfterMove(const Move &move)
+{
     colorType originColor = currColor;
     makeMoveAssumeLegal(move);
     int kingX = -1, kingY = -1;
-    for (int x = 0; x < BOARDWIDTH; x++) {
-        for (int y = 0; y < BOARDHEIGHT; y++) {
-            auto& curGrid = state[currTurnId][xy2pos(x, y)];
-            if (curGrid.color == oppColor(originColor) && curGrid.type == King) {
-                kingX = x; kingY = y;
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
+            auto &curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color == oppColor(originColor) && curGrid.type == King)
+            {
+                kingX = x;
+                kingY = y;
                 break;
             }
         }
@@ -781,65 +1035,91 @@ bool Chess::isOppKingAttackedAfterMove(const Move &move) {
     return oppKingBeingAttacked;
 }
 
-// 是否超过无吃子回合数（自然限着规则通常为60回合）
-bool Chess::exceedMaxPeaceState() {
+// 判断对局是否达到自然限着回合数导致平局的函数定义
+bool Chess::exceedMaxPeaceState()
+{
     return continuePeaceTurn[currTurnId] >= 60 - 1;
 }
 
-int Chess::xy2pos(int mx, int my) {
+// 将二维坐标映射到一维数组索引的函数定义
+int Chess::xy2pos(int mx, int my)
+{
     return my * BOARDWIDTH + mx;
 }
-int Chess::pos2x(int mpos) {
+
+// 将一维数组索引解码为X轴坐标的函数定义
+int Chess::pos2x(int mpos)
+{
     return mpos % BOARDWIDTH;
 }
-int Chess::pos2y(int mpos) {
+
+// 将一维数组索引解码为Y轴坐标的函数定义
+int Chess::pos2y(int mpos)
+{
     return mpos / BOARDWIDTH;
 }
 
-// 是否在九宫格
-bool Chess::inKingArea(int mx, int my, colorType mcolor) {
+// 判断给定坐标是否位于指定方九宫格内的函数定义
+bool Chess::inKingArea(int mx, int my, colorType mcolor)
+{
     assert(mcolor == RED || mcolor == BLACK);
-    if (mcolor == RED) {
+    if (mcolor == RED)
+    {
         return mx >= 3 && mx <= 5 && my >= 0 && my <= 2;
-    } else {
+    }
+    else
+    {
         return mx >= 3 && mx <= 5 && my >= 7 && my <= 9;
     }
 }
 
-// 是否在己方阵地（不能过河）
-bool Chess::inColorArea(int mx, int my, colorType mcolor) {
+// 判断给定坐标是否位于指定方半场内的函数定义
+bool Chess::inColorArea(int mx, int my, colorType mcolor)
+{
     assert(mcolor == RED || mcolor == BLACK);
-    if (mcolor == RED) {
+    if (mcolor == RED)
+    {
         return my <= 4;
-    } else {
+    }
+    else
+    {
         return my >= 5;
     }
 }
 
-// 获取起点和终点之间的棋子数
-int Chess::betweenNotEmptyNum(int sx, int sy, int ex, int ey) {
+// 统计同行或同列两坐标点之间障碍棋子数量的函数定义
+int Chess::betweenNotEmptyNum(int sx, int sy, int ex, int ey)
+{
     assert(inSameStraightLine(sx, sy, ex, ey));
     int dex = ex > sx ? 1 : (ex == sx ? 0 : -1);
     int dey = ey > sy ? 1 : (ey == sy ? 0 : -1);
     int tx = sx + dex, ty = sy + dey;
     int retNum = 0;
-    while (inBoard(tx, ty) && !(tx == ex && ty == ey)) {
-        auto& tGrid = state[currTurnId][xy2pos(tx, ty)];
-        if (tGrid.color != EMPTY) {
+    while (inBoard(tx, ty) && !(tx == ex && ty == ey))
+    {
+        auto &tGrid = state[currTurnId][xy2pos(tx, ty)];
+        if (tGrid.color != EMPTY)
+        {
             retNum++;
         }
-        tx += dex; ty += dey;
+        tx += dex;
+        ty += dey;
     }
     return retNum;
 }
 
-colorType Chess::oppColor(colorType mcolor) {
+// 返回给定颜色相对对手颜色的函数定义
+colorType Chess::oppColor(colorType mcolor)
+{
     return mcolor == RED ? BLACK : RED;
 }
 
-// 回溯/撤销一步棋（供历史模拟和搜索引擎使用）
-void Chess::undoMove() {
-    if (currTurnId == 0) {
+// 撤销落子并恢复系统至上一步状态的函数定义
+// 注意先前的状态均需要改变
+void Chess::undoMove()
+{
+    if (currTurnId == 0)
+    {
         return;
     }
     state.pop_back();
@@ -849,41 +1129,50 @@ void Chess::undoMove() {
     lastMoveEaten.pop_back();
 }
 
-// 生成排除了导致局面重复的合法招法（长将长捉禁手防御简化版）
-void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend) {
+// 生成满足禁手规则的合法移动步集合的函数定义
+void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend)
+{
     vector<Move> firstMoves;
     generateMoves(firstMoves, mustDefend);
     legalMoves.clear();
-    for (const auto& move : firstMoves) {
-        if (!repeatAfterMove(move)) {
+    for (const auto &move : firstMoves)
+    {
+        if (!repeatAfterMove(move))
+        {
             legalMoves.push_back(move);
         }
     }
 }
 
-// 检查走完这步是否会导致三次重复局面
-bool Chess::repeatAfterMove(const Move& move) {
+
+
+// 评估某步移动后是否会导致达到三次重复局面的函数定义
+bool Chess::repeatAfterMove(const Move &move)
+{
     makeMoveAssumeLegal(move);
     int tmp_id = currTurnId;
-    // 只要有吃子就不算重复状态，可以剪枝
-    if (lastMoveEaten[tmp_id]) {
+    if (lastMoveEaten[tmp_id])
+    {
         undoMove();
         return false;
     }
-    // 往前回溯找到上一次吃子的时候（或者开局）
-    while (true) {
-        if (tmp_id <= 1) {
+    while (true)
+    {
+        if (tmp_id <= 1)
+        {
             break;
         }
-        if (lastMoveEaten[tmp_id-2]) {
+        if (lastMoveEaten[tmp_id - 2])
+        {
             break;
         }
         tmp_id -= 2;
     }
     int repeatTime = 0;
-    // 对比历史记录中是否有相同盘面，到达3次判重复
-    for (int id = currTurnId; id >= tmp_id; id -= 2) {
-        if (state[id] == state[currTurnId]) {
+    for (int id = currTurnId; id >= tmp_id; id -= 2)
+    { //从后往前，而非从前往后，跳跃比对
+        if (state[id] == state[currTurnId])
+        {
             repeatTime++;
         }
     }
@@ -891,162 +1180,1201 @@ bool Chess::repeatAfterMove(const Move& move) {
     return repeatTime >= 3;
 }
 
-bool Chess::isLegalMoveWithForbidden(const Move& move, bool mustDefend) {
+// 综合判断给定移动是否遵守禁手规则而合法的函数定义
+bool Chess::isLegalMoveWithForbidden(const Move &move, bool mustDefend)
+{
     vector<Move> currLegalMoves;
     generateMovesWithForbidden(currLegalMoves, mustDefend);
     auto fi_iter = std::find(currLegalMoves.begin(), currLegalMoves.end(), move);
     return fi_iter != currLegalMoves.end();
 }
 
-// 命令行打印当前棋盘
-void Chess::printBoard() {
-    std::cout << std::endl << "Board" << std::endl;
-    for (int y = 9; y >= 0; y--) {
-        for (int x = 0; x <= 8; x++) {
-            std::cout << stoneSym[state[currTurnId][xy2pos(x,y)].type] << " ";
+// 将当前棋盘通过控制台可视化的函数定义
+void Chess::printBoard()
+{
+    std::cout << std::endl
+              << "Board" << std::endl;
+    for (int y = 9; y >= 0; y--)
+    {
+        for (int x = 0; x <= 8; x++)
+        {
+            std::cout << stoneSym[state[currTurnId][xy2pos(x, y)].type] << " ";
         }
         std::cout << std::endl;
     }
 }
 
-bool Chess::isMoveValidWithForbidden(const Move& move, bool mustDefend) {
+//======================以下为添加的函数方法=======================\\
+
+// 验证在禁手规则限制下某移动是否有效的函数定义
+bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
+{
     return isLegalMoveWithForbidden(move, mustDefend);
 }
 
-//???????????????
+void ChessAI::getcurstones()
+{
+    int Color = this->board->currColor;
+    int tmp = this->board->currTurnId;
+    for (int y = 9; y >= 0; y--)
+    {
+        for (int x = 0; x <= 8; x++)
+        {
+            if (board->state[tmp][board->xy2pos(x, y)].color == Color)
+            {
+                evaluator.curstones.push_back(board->state[tmp][board->xy2pos(x, y)]); 
+                evaluator.curattacked.push_back(evaluator.isattacked(board->oppColor(), x, y));  
+            }
+        }
+    }
+}
 
-//1.????????????????????????????????????void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend=true) ???????????
-//2.???????????????????????bool makeMoveAssumeLegal(const Move& move)
-//3.???????????????????????void undoMove()
+//由attacked接口 ： 非将帅，这一点是否受特定棋子攻击?
+//我方的各个棋子是否会被攻击
+// color为对方的color，我方的点为(mx,my)
+//保留该接口，在ChessAI中使用
+bool Chess::isattacked(colorType color, int mx, int my)
+{
+    for (int x = 0; x < BOARDWIDTH; x++)
+    {
+        for (int y = 0; y < BOARDHEIGHT; y++)
+        {
+            auto &curGrid = state[currTurnId][xy2pos(x, y)];
+            if (curGrid.color != color)
+            {
+                continue;
+            }
+            int dex = mx - x, dey = my - y; //当前敌方棋子的坐标为(x,y)
+            switch (curGrid.type)
+            {
+            case King:
+            {
+                // King不能超出九宫格  我方是否在对方 将/帅 的九宫格内？
+                if ((abs(dex) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))) || (abs(dex) == 0 && abs(dey) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))))
+                {
+                    return true;
+                }
+                break;
+            }
+            case Assistant:
+            {
+                if (inKingArea(mx, my, oppColor(color)))
+                {
+                    if (abs(dex) == 1 && abs(dey) == 1)
+                    {
+                        return true;
+                    }
+                }
+                break;
+            }
+            case Knight:
+            {
+                if (abs(dex) == 2 && abs(dey) == 1)
+                {
+                    int fx = x + (dex > 0 ? 1 : -1), fy = y;
+                    auto &fGrid = state[currTurnId][xy2pos(fx, fy)];
+                    if (fGrid.color == EMPTY)
+                    {
+                        return true;
+                    }
+                }
+                else if (abs(dex) == 1 && abs(dey) == 2)
+                {
+                    int fx = x, fy = y + (dey > 0 ? 1 : -1);
+                    auto &fGrid = state[currTurnId][xy2pos(fx, fy)];
+                    if (fGrid.color == EMPTY)
+                    {
+                        return true;
+                    }
+                }
+                break;
+            }
+            case Bishop:
+            {
+                if (abs(dex) == 2 && abs(dey) == 2)
+                {
+                    int ex = x + dex / 2, ey = y + dey / 2;
+                    auto &eGrid = state[currTurnId][xy2pos(ex, ey)];
+                    if (eGrid.color == EMPTY)
+                    {
+                        return true;
+                    }
+                }
+                break;
+            }
+            case Rook:
+            {
+                if (inSameStraightLine(x, y, mx, my) && betweenIsEmpty(x, y, mx, my))
+                {
+                    return true;
+                }
+                break;
+            }
+            case Pawn:
+            {
+                int forwardOne = (curGrid.color == RED ? 1 : -1);
+                bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
+                if (dex == 0 && dey == forwardOne)
+                {
+                    return true;
+                }
+                if (crossMidLine && (abs(dex) == 1 && dey == 0))
+                {
+                    return true;
+                }
+                break;
+            }
+            case Cannon:
+            {
+                if (inSameStraightLine(x, y, mx, my) && betweenNotEmptyNum(x, y, mx, my) == 1)
+                {
+                    return true;
+                }
+                break;
+            }
+            case None:
+            {
+                throw std::runtime_error("color is not empty but type is none");
+                break;
+            }
+            }
+        }
+    }
+    return false;
+}
+
+//传入对方的颜色 我方棋子的位置，验证对方是否能攻击到我方棋子
+bool EvalRecord::isattacked(colorType color, int mx, int my)
+{
+    if (color == board->currColor)
+    {
+        throw std::runtime_error("False color:expected oppsite color");
+    }
+
+    if (board->state[board->currTurnId][board->xy2pos(mx, my)].type == King)
+    {
+        return board->attacked(color, mx, my);
+    }
+    else
+    {
+        return board->isattacked(color, mx, my);
+    }
+}
+
+void ChessAI::generateMovesWithForbidden()
+{
+    board->generateMoveNodesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
+    //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
+}
+
+void ChessAI::getdiffmoves()
+{
+    for (auto &s : this->curlegalmoves)
+    {
+        if (board->state[board->currTurnId][board->xy2pos(s.strategy.target_x, s.strategy.target_y)].color == board->oppColor())
+        {
+            this->eatenmoves.push_back(s);
+        }
+        else
+        {
+            this->plainmoves.push_back(s);
+        }
+    }
+}
+
+ChessAI::ChessAI()
+    : searchTime(900)
+{
+    this->board = new Chess();
+    this->evaluator.copyBoard(this->board);
+
+    //初始化其它成员变量
+    evaluator.isKingattacked = false;
+}
+
+ChessAI::~ChessAI()
+{
+    //有指针变量，必须指定析构函数
+    if (board != nullptr)
+    {
+        delete board;
+        board = nullptr;
+    }
+}
 
 
+//中局有进攻机会的兵 / 帅
+static const int mid_KingPawn_attack[90] = {
+    10, 10, 10, 15, 15, 15, 10, 10, 10,
+    50, 55, 60, 85,100, 85, 60, 55, 50,
+    65, 70, 70, 75, 75, 75, 70, 70, 65,
+    75, 80, 80, 80, 80, 80, 80, 80, 75,
+    70, 70, 65, 70, 70, 70, 65, 70, 70,
+    45,  0, 40, 45, 45, 45, 40,  0, 45,
+    40,  0, 35, 40, 40, 40, 35,  0, 40,
+     0,  0,  5,  5, 15,  5,  5,  0,  0,
+     0,  0,  3,  3, 13,  3,  3,  0,  0,
+     0,  0,  1,  1, 11,  1,  1,  0,  0,
+};
 
+//中局无进攻机会的兵 / 帅
+static const int mid_KingPawn_no_attack[90] = {
+    10, 10, 10, 15, 15, 15, 10, 10, 10,  
+    10, 15, 20, 45, 60, 45, 20, 15, 10, 
+    25, 30, 30, 35, 35, 35, 30, 30, 25,  
+    35, 40, 40, 45, 45, 45, 40, 40, 35, 
+    25, 30, 30, 35, 35, 35, 30, 30, 25, 
+    25,  0, 25, 25, 25, 25, 25,  0, 25,  
+    20,  0, 20, 20, 20, 20, 20,  0, 20, 
+    0,  0,  5,  5, 13,  5,  5,  0,  0, 
+    0,  0,  3,  3, 12,  3,  3,  0,  0, 
+    0,  0,  1,  1, 11,  1,  1,  0,  0,
+};
+//残局有进攻机会的兵 / 帅
+static const int end_KingPawn_attack[90] = {
 
-void giveOutputTime(Chess& chess) {
-    // 记录开始时间
-    startTime = clock(); 
+    10, 10, 10, 15, 15, 15, 10, 10, 10, 
+    50, 55, 60, 85,100, 85, 60, 55, 50, 
+    65, 70, 70, 75, 75, 75, 70, 70, 65, 
+    75, 80, 80, 80, 80, 80, 80, 80, 75, 
+    70, 70, 65, 70, 70, 70, 65, 70, 70,
+    45,  0, 40, 45, 45, 45, 40,  0, 45,
+    40,  0, 35, 40, 40, 40, 35,  0, 40,
+    0,  0,  5,  5, 15,  5,  5,  0,  0,
+    0,  0,  3,  3, 13,  3,  3,  0,  0,
+    0,  0,  1,  1, 11,  1,  1,  0,  0, 
+};
 
-    vector<Move> retMoves;
-    chess.generateMovesWithForbidden(retMoves);
-    Json::Value ret;
+//残局无进攻机会的兵 / 帅
+static const int end_KingPawn_no_attack[90] = {
+    10, 10, 10, 15, 15, 15, 10, 10, 10, 
+    10, 15, 20, 45, 60, 45, 20, 15, 10,
+    25, 30, 30, 35, 35, 35, 30, 30, 25, 
+    35, 40, 40, 45, 45, 45, 40, 40, 35, 
+    25, 30, 30, 35, 35, 35, 30, 30, 25, 
+    25,  0, 25, 25, 25, 25, 25,  0, 25, 
+    20,  0, 20, 20, 20, 20, 20,  0, 20, 
+    0,  0,  5,  5, 13,  5,  5,  0,  0, 
+    0,  0,  3,  3, 12,  3,  3,  0,  0,  
+    0,  0,  1,  1, 11,  1,  1,  0,  0,
+};
+//有威胁的士和象
+static const int mid_AdvBis_no_Threat[90] = {
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0, 20,  0,  0,  0, 20,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+    18,  0,  0, 20, 23, 20,  0,  0, 18,
+     0,  0,  0,  0, 23,  0,  0,  0,  0,
+     0,  0, 20, 20,  0, 20, 20,  0,  0,
+};
 
-    if (retMoves.empty()) {
-        ret["response"]["source"] = string("-1");
-        ret["response"]["target"] = string("-1");
-    } else {
-        bool isRedTurn = (chess.getCurrColor() == RED);
-        Move globalBestMove = retMoves[0]; // 最佳走法
+//有威胁的士和象
+static const int mid_AdvBis_Threat[90] = {
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+     0,  0, 40,  0,  0,  0, 40,  0,  0,
+     0,  0,  0,  0,  0,  0,  0,  0,  0,
+    38,  0,  0, 40, 43, 40,  0,  0, 38,
+     0,  0,  0,  0, 43,  0,  0,  0,  0,
+     0,  0, 40, 40,  0, 40, 40,  0,  0,
+};
 
-        // 加深搜索
-        try {
-            for (int depth = 1; depth <= 30; ++depth) {
-                Move currentDepthBestMove = retMoves[0];
-                int bestScore = isRedTurn ? -1 : 100;
+//中局的马
+static const int mid_horse[90] = {
+    90, 90, 90, 96, 90, 96, 90, 90, 90,
+    90, 96,103, 97, 94, 97,103, 96, 90,
+    92, 98, 99,103, 99,103, 99, 98, 92,
+    93,108,100,107,100,107,100,108, 93,
+    90,100, 99,103,104,103, 99,100, 90,
+    90, 98,101,102,103,102,101, 98, 90,
+    92, 94, 98, 95, 98, 95, 98, 94, 92,
+    93, 92, 94, 95, 92, 95, 94, 92, 93,
+    85, 90, 92, 93, 78, 93, 92, 90, 85,
+    88, 85, 90, 88, 90, 88, 90, 85, 88,
+};
 
-                sortMoves(chess, retMoves); // 顶层排序
+//残局的马
+static const int end_horse[90] = {
+    92, 94, 96, 96, 96, 96, 96, 94, 92,
+    94, 96, 98, 98, 98, 98, 98, 96, 94,
+    96, 98,100,100,100,100,100, 98, 96,
+    96, 98,100,100,100,100,100, 98, 96,
+    96, 98,100,100,100,100,100, 98, 96,
+    94, 96, 98, 98, 98, 98, 98, 96, 94,
+    94, 96, 98, 98, 98, 98, 98, 96, 94,
+    92, 94, 96, 96, 96, 96, 96, 94, 92,
+    90, 92, 94, 92, 92, 92, 94, 92, 90,
+    88, 90, 92, 90, 90, 90, 92, 90, 88,
+};
 
-                for (const Move& move : retMoves) {
-                    chess.makeMoveAssumeLegal(move);
-                    int score = alphaBetaSearch(chess, depth - 1, -1, 100, !isRedTurn); 
-                    chess.undoMove();
+//中局的车
+static const int mid_Rook[90] = {
+   206,208,207,213,214,213,207,208,206,
+   206,212,209,216,233,216,209,212,206,
+   206,208,207,214,216,214,207,208,206,
+   206,213,213,216,216,216,213,213,206,
+   208,211,211,214,215,214,211,211,208,
+   208,212,212,214,215,214,212,212,208,
+   204,209,204,212,214,212,204,209,204,
+   198,208,204,212,212,212,204,208,198,
+   200,208,206,212,200,212,206,208,200,
+   194,206,204,212,200,212,204,206,194,
+};
 
-                    if (isRedTurn) {
-                        if (score > bestScore) {
-                            bestScore = score;
-                            currentDepthBestMove = move;
+//残局的车
+static const int end_Rook[90] = {
+   182,182,182,184,186,184,182,182,182,
+   184,184,184,186,190,186,184,184,184,
+   182,182,182,184,186,184,182,182,182,
+   180,180,180,182,184,182,180,180,180,
+   180,180,180,182,184,182,180,180,180,
+   180,180,180,182,184,182,180,180,180,
+   180,180,180,182,184,182,180,180,180,
+   180,180,180,182,184,182,180,180,180,
+   180,180,180,182,184,182,180,180,180,
+   180,180,180,182,184,182,180,180,180,
+};
+
+//中局的炮
+static const int mid_Cannon[90] = {
+   100,100, 96, 91, 90, 91, 96,100,100,
+    98, 98, 96, 92, 89, 92, 96, 98, 98,
+    97, 97, 96, 91, 92, 91, 96, 97, 97,
+    96, 99, 99, 98,100, 98, 99, 99, 96,
+    96, 96, 96, 96,100, 96, 96, 96, 96,
+    95, 96, 99, 96,100, 96, 99, 96, 95,
+    96, 96, 96, 96, 96, 96, 96, 96, 96,
+    97, 96,100, 99,101, 99,100, 96, 97,
+    96, 97, 98, 98, 98, 98, 98, 97, 96,
+    96, 96, 97, 99, 99, 99, 97, 96, 96,
+};
+
+//残局的炮
+static const int end_Cannon[90] = {
+   100,100,100,100,100,100,100,100,100,
+   100,100,100,100,100,100,100,100,100,
+   100,100,100,100,100,100,100,100,100,
+   100,100,100,102,104,102,100,100,100,
+   100,100,100,102,104,102,100,100,100,
+   100,100,100,102,104,102,100,100,100,
+   100,100,100,102,104,102,100,100,100,
+   100,100,100,102,104,102,100,100,100,
+   100,100,100,104,106,104,100,100,100,
+   100,100,100,104,106,104,100,100,100,
+};
+
+//填充Gridcontrol 格点控制表
+void EvalRecord::getGridcontrol(){
+    if(board == nullptr){
+        throw std::runtime_error("(getGridcontrol)board is null");
+    }
+
+    //每次使用前都重新清空控制点字典
+    for(int side = 0; side < 2; side ++){
+        for(int pos = 0; pos < 90; pos ++){
+            GridControl[side][pos] = 0;
+        }
+    }
+
+    //当前棋局:
+    int tmp = board->currTurnId;
+    for(int y = 0; y < BOARDHEIGHT; y ++){
+        for(int x = 0; x < BOARDWIDTH; x ++){
+            auto &curGrid = board->state[tmp][board->xy2pos(x, y)];
+            if(curGrid.color == EMPTY){
+                continue;
+            }
+
+            //红色映射到0，黑色映射到1
+            int colorId = (curGrid.color == RED ? 0 : 1);
+
+            switch (curGrid.type)
+            {
+            case None:
+                break;
+            case King: //将帅是否能够攻击：普通攻击 / 照面将
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
+                    if(!board->inKingArea(tx, ty, curGrid.color)){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                    //这里不使用color传参，使用board中的currColor
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
+                }
+                //将帅照面：King沿竖线遇到对方King时，同样计为可控制
+                for(int dir = -1; dir <= 1; dir += 2){
+                    int ty = y + dir;
+                    while(board->inBoard(x, ty)){
+                        auto &tGrid = board->state[tmp][board->xy2pos(x, ty)];
+                        if(tGrid.color != EMPTY){
+                            if(tGrid.type == King && tGrid.color != curGrid.color){
+                                GridControl[colorId][board->xy2pos(x, ty)] ++;
+                                
+                                //填充havecontrol
+                                if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(x,ty)].type != None){
+                                    this->havecontrol[board->xy2pos(x,y)] = true;
+                                }
+                            }
+                            break;
                         }
-                    } else {
-                        if (score < bestScore) {
-                            bestScore = score;
-                            currentDepthBestMove = move;
+                        ty += dir;
+                    }
+                }
+                break;
+            }
+            case Assistant:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_ob[dir], ty = y + dy_ob[dir];
+                    if(!board->inKingArea(tx, ty, curGrid.color)){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                    
+                    //填充havecontrol
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
+                }
+                break;
+            }
+            case Bishop:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_bishop[dir], ty = y + dy_bishop[dir];
+                    if(!board->inBoard(tx, ty) || !board->inColorArea(tx, ty, curGrid.color)){
+                        continue;
+                    }
+                    int ex = x + dx_bishop_eye[dir], ey = y + dy_bishop_eye[dir];
+                    auto &eGrid = board->state[tmp][board->xy2pos(ex, ey)];
+                    if(eGrid.color != EMPTY){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+
+                    //填充havecontrol
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
+                }
+                break;
+            }
+            case Knight:
+            {
+                for(int dir = 0; dir < 8; dir ++){
+                    int tx = x + dx_knight[dir], ty = y + dy_knight[dir];
+                    if(!board->inBoard(tx, ty)){
+                        continue;
+                    }
+                    int fx = x + dx_knight_foot[dir], fy = y + dy_knight_foot[dir];
+                    auto &fGrid = board->state[tmp][board->xy2pos(fx, fy)];
+                    if(fGrid.color != EMPTY){
+                        continue;
+                    }
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+
+
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
+                }
+                break;
+            }
+            case Rook:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
+                    while(board->inBoard(tx, ty)){
+                        GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                            this->havecontrol[board->xy2pos(x,y)] = true;
+                        }
+                        auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(tGrid.color != EMPTY){
+                            break;
+                        }
+                        tx += dx_strai[dir];
+                        ty += dy_strai[dir];
+                    }
+                }
+                break;
+            }
+            case Cannon:
+            {
+                for(int dir = 0; dir < 4; dir ++){
+                    int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
+                    bool hasScreen = false;
+                    while(board->inBoard(tx, ty)){
+                        auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(!hasScreen){
+                            if(tGrid.color == EMPTY){
+                                GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                            }else{
+                                hasScreen = true;  //被遮挡，能架炮。第一个架炮点之前的位置都不算控制
+                            }
+                        }else{
+                            if(tGrid.color != EMPTY){
+                                GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                            if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                                this->havecontrol[board->xy2pos(x,y)] = true;
+                            }
+                                break;
+                            }
+                        }
+                        tx += dx_strai[dir];
+                        ty += dy_strai[dir];
+                    }
+                }
+                break;
+            }
+            case Pawn:
+            {
+                int forwardOne = (curGrid.color == RED ? 1 : -1);
+                int tx = x, ty = y + forwardOne;
+                if(board->inBoard(tx, ty)){
+                    GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    }
+                }
+                bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
+                if(crossMidLine){
+                    for(int dir = 0; dir < 2; dir ++){
+                        tx = x + dx_lr[dir], ty = y;
+                        if(board->inBoard(tx, ty)){
+                            GridControl[colorId][board->xy2pos(tx, ty)] ++;
+                        }
+                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
+                            this->havecontrol[board->xy2pos(x,y)] = true;
                         }
                     }
                 }
-                
-                // 搜索完这一层更新最佳走法
-                globalBestMove = currentDepthBestMove; 
-                if (bestScore > 90 || bestScore < -90) break; // kill提前结束
+                break;
             }
-        } catch (const TimeOutException& e) {
-            // 超时，跳出循环，使用上一层得到的 globalBestMove
+            }
         }
+    }
+}
 
-        ret["response"]["source"] = string(1, pgnint2char(globalBestMove.source_x)) + string(1, int2char(globalBestMove.source_y));
-        ret["response"]["target"] = string(1, pgnint2char(globalBestMove.target_x)) + string(1, int2char(globalBestMove.target_y));
+bool EvalRecord::hasattackchance(int mx,int my){
+
+    //依靠board->getGridcontrol
+    return this->havecontrol[board->xy2pos(mx,my)];
+}
+
+//当前是否为中局：车 6 马炮 3 其它 1
+const int Rook_state = 6;
+const int HorseCannon_state = 3;
+const int other_state = 1;
+const int Total_state = 66;
+//判断当前是否为中局 
+bool EvalRecord::ismiddlecompostion(vector<Grid>& vec){
+    int tmp = 0;
+    for(int y = 9; y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            if(vec[board->xy2pos(x,y)].type == Rook){
+                tmp += Rook_state;
+            }else if(vec[board->xy2pos(x,y)].type == Knight || vec[board->xy2pos(x,y)].type == Cannon){
+                tmp += HorseCannon_state;
+            }else{
+                tmp += other_state;
+            }
+        }
+    }
+    return tmp > (Total_state / 2);
+}
+
+//注意：静态棋力表中的数据均为对红方而言的数据，颜色不同时，需要翻转————(9 - x,10 - y)
+//参考Eleeye中的静态估值 vec调用board->state中的当前状态
+int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
+{
+    if(this->board == nullptr){
+        throw(std::runtime_error("(calstaticstate)board is null"));
+    }
+    bool ismiddle = ismiddlecompostion(vec);
+    //判断color:红色和黑色的静态表对称
+
+    int res = 0;
+
+    //红方 中局
+    //(x,y) -> (9*(9 - y) + x + 1 = 82 - 9 * y + x)
+    if(color == RED && ismiddle){
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? mid_KingPawn_attack[82 - 9 * y + x] : mid_KingPawn_no_attack[82 - 9 * y  + x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_Threat[82 - 9 * y + x] : mid_AdvBis_no_Threat[82 - 9 * y + x];
+                    break;
+                }
+                case Knight:
+                    res += mid_horse[82 - 9 * y + x];
+                case Rook:
+                    res += mid_Rook[82 - 9 * y + x];
+                case Cannon:
+                    res += mid_Cannon[82 - 9 * y + x];
+                default:
+                    break;
+                }
+            }
+        }
+    }else if(color == RED && !ismiddle){ //红色 残局
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? end_KingPawn_attack[82 - 9 * y + x] : end_KingPawn_no_attack[82 - 9 * y  + x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_Threat[82 - 9 * y + x] : mid_AdvBis_no_Threat[82 - 9 * y + x];
+                    break;
+                }
+                case Knight:
+                    res += end_horse[82 - 9 * y + x];
+                case Rook:
+                    res += end_Rook[82 - 9 * y + x];
+                case Cannon:
+                    res += end_Cannon[82 - 9 * y + x];
+                default:
+                    break;
+                }
+            }
+        }if(color == BLACK && ismiddle){
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? mid_KingPawn_attack[9 + 9 * y - x] : mid_KingPawn_no_attack[9 + 9 * y - x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_Threat[9 + 9 * y - x] : mid_AdvBis_no_Threat[9 + 9 * y - x];
+                    break;
+                }
+                case Knight:
+                    res += mid_horse[9 + 9 * y - x];
+                case Rook:
+                    res += mid_Rook[9 + 9 * y - x];
+                case Cannon:
+                    res += mid_Cannon[9 + 9 * y - x];
+                default:
+                    break;
+                    }
+                }
+            }
+        }else{ //color == BLACK && !ismiddle
+        for(int y = 9;y >= 0;y --){
+            for(int x = 0;x <= 8;x ++){
+                if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+                switch (vec[board->xy2pos(x,y)].type)
+                {
+                case None:
+                    break;
+                case Pawn:
+                case King:{
+                    bool flag = this->hasattackchance(x,y);
+                    res += (flag) ? end_KingPawn_attack[9 + 9 * y - x] : end_KingPawn_no_attack[9 + 9 * y - x];
+                    break;
+                }
+                case Assistant:
+                case Bishop:{
+                    bool flag = this->isattacked(RED,x,y);
+                    res += (flag) ? mid_AdvBis_no_Threat[9 + 9 * y - x] : mid_AdvBis_no_Threat[9 + 9 * y - x];
+                    break;
+                }
+                case Knight:
+                    res += end_horse[9 + 9 * y - x];
+                case Rook:
+                    res += end_Rook[9 + 9 * y - x];
+                case Cannon:
+                    res += end_Cannon[9 + 9 * y - x];
+                default:
+                    break;
+                    }
+                }
+            }
+        }
+    }
+
+    return res;
+}
+
+//借鉴eleeye中的一系列动态得分机制
+
+//1.特殊棋型 空头炮 / 窝心马(暂时不考虑)
+//2.进攻度分析 —————— 对对方半场的控制度
+//3.防御度分析 —————— 对我方半场的控制度
+const int EnemyKingArea = 8;  //敌方九宫区域 ———— 最为重要，唯有控制敌方九宫才有夺取胜利的机会！
+const int EnemyHalf = 5; 
+const int OwnHalf = 2;        //我方半场
+const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
+const int attackweight = 1;       //或使用double，进攻权重
+const int defenceweight = 1;      //或使用double，防御权重
+int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
+    //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
+    int myattack = 0,myDefense = 0; 
+    int oppattack = 0,oppDefence = 0;
+
+    //区分颜色
+    int idx = (color == RED) ? 0 : 1; //对应控制表内不同映射
+    for(int y = 9;y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            auto& tmpgrid = target[board->xy2pos(x,y)];
+            int pos = board->xy2pos(x,y);
+
+            if(idx == 0){
+                if(y <= 4){ //红方半场
+                    if(board->inKingArea(x,y,RED)){
+                        myDefense += GridControl[idx][pos] * OwnKingArea;
+                    }else{
+                        myDefense += GridControl[idx][pos] * OwnHalf;
+                    }
+                }else{
+                    if(board->inKingArea(x,y,RED)){
+                        myattack += GridControl[idx][pos] * EnemyKingArea;
+                    }else{
+                        myattack += GridControl[idx][pos] * EnemyHalf;
+                    }
+                }
+            }else{
+                if(y >= 5){ //黑方半场
+                    if(board->inKingArea(x,y,BLACK)){
+                        myDefense += GridControl[idx][pos] * OwnKingArea;
+                    }else{
+                        myDefense += GridControl[idx][pos] * OwnHalf;
+                    }
+                }else{
+                    if(board->inKingArea(x,y,BLACK)){
+                        myattack += GridControl[idx][pos] * EnemyKingArea;
+                    }else{
+                        myattack += GridControl[idx][pos] * EnemyHalf;
+                    }
+                }
+            }
+        }
     }
     
-    Json::FastWriter writer;
-    cout << writer.write(ret) << endl;
-}//分数中具体数值待填，暂时用-1和100占位
+    //进攻度分析 ———— Gridcontrol 我方在对方半场的控制点、对方在对方半场的控制点
 
+    //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
 
-// 对走法进行启发式排序
-void sortMoves(const Chess& chess, vector<Move>& moves)
-{
-
+    //最终结果为：我方总得分 - 对方总得分
+    int res = attackweight * (myattack - oppattack) + defenceweight * (myDefense - oppDefence);
+    return res;
 }
 
+//静态评估系数(暂时采用int)、动态评估系数(暂时采用int)
+const int mystaticweight = 1;
+const int mydynamicweight = 1;
+const int oppstaticweight = 1;
+const int oppdynamicweight = 1;
 
-// 评估，给出分数用于排序
-int getMovePriority(const Chess& chess, const Move& move) 
-{
+//集成局面总评估方法(后续进行补充)
+int EvalRecord::calstate(vector<Grid>& target,colorType color){
 
+    int res = 0;
+    res += this->calstaticstate(target,color);
+    res += this->caldynamicstate(target,color);
+    return res;
 }
 
-// alpha-beta 搜索
-int alphaBetaSearch(Chess& chess, int depth, int alpha, int beta, bool isRedTurn)
-{
-    // 每次进入新节点，检查时间
-    checkTime(); 
-
-    if (depth == 0) {
-        return evaluateBoard(chess);
-    }
-
-    vector<Move> legalMoves;
-    chess.generateMovesWithForbidden(legalMoves);
+//评估单步着法的估值，可能不只是预估我方的某个着法
+int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
+    //求delta值，现在的评分 —— 先前的评分
+    //评价方为Move所属的着棋一方，着棋一方使用"my...",对方使用"opp..."
+    assert(curstate[board->xy2pos(cur.source_x,cur.source_y)].color == color);
     
-    if (legalMoves.empty()) {
-        return isRedTurn ? -1 : 100; // 越快将死对手得分越高
-    }
-    if (chess.exceedMaxPeaceState()) {
-        return 0;
-    }
-    // 对走法进行启发式排序
-    sortMoves(chess, legalMoves);
+    int mypreval = 0,mycurval = 0;
+    int opppreval = 0,oppcurval = 0;
+    colorType oppcol = (color == RED) ? BLACK : RED;
 
-    if (isRedTurn) {
-        int maxEval = -1;
-        for (const Move& move : legalMoves) {
-            chess.makeMoveAssumeLegal(move);
-            int eval = alphaBetaSearch(chess, depth - 1, alpha, beta, false);
-            chess.undoMove();
-            
-            maxEval = std::max(maxEval, eval);
-            alpha = std::max(alpha, eval);
-            if (beta <= alpha) break; // Beta 剪枝
-        }
-        return maxEval;
-    } else {
-        int minEval = 100;
-        for (const Move& move : legalMoves) {
-            chess.makeMoveAssumeLegal(move);
-            int eval = alphaBetaSearch(chess, depth - 1, alpha, beta, true);
-            chess.undoMove();
-            
-            minEval = std::min(minEval, eval);
-            beta = std::min(beta, eval);
-            if (beta <= alpha) break; // Alpha 剪枝
-        }
-        return minEval;
-    }
-}//分数中具体数值待填，暂时用-1和100占位
+    mypreval = calstate(curstate,color);
+    opppreval = calstate(curstate,oppcol);
 
+    //不可以修改curstate！拷贝或者使用回撤，但一旦Grid某处被覆盖掉，则不知道覆盖之前的值
+    auto copyst = curstate;
+    
+    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
+    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
 
-int evaluateBoard(const Chess& chess)
-{
+    //更新临时对象copyst
+    copyst[source_pos].color = EMPTY;
+    copyst[source_pos].type = None;  // 吃子/移动不仅要变空颜色，连棋子类型也要抹去
+    copyst[target_pos].color = color;
+    copyst[target_pos].type = curstate[source_pos].type;   // 赋予新走到这里的棋子类型
 
+    mycurval = calstate(copyst,color);
+    oppcurval = calstate(copyst,oppcol);
+
+    //自身增量减去对方增量
+    return (mycurval - mypreval) - (oppcurval - opppreval);
 }
+
+//填充MoveNode，并排序
+void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
+int ChessAI::fast_move_heuristic(const Move& mv) {
+    // 使用轻量 MVV-LVA 风格打分，避免深层重复触发高成本全局评估。
+    static const int pieceValue[8] = {0, 10000, 110, 300, 600, 70, 320, 120};
+    auto& cur = board->state[board->currTurnId];
+
+    const int srcPos = board->xy2pos(mv.source_x, mv.source_y);
+    const int tgtPos = board->xy2pos(mv.target_x, mv.target_y);
+
+    const auto srcType = cur[srcPos].type;
+    const auto tgtType = cur[tgtPos].type;
+    const auto tgtColor = cur[tgtPos].color;
+
+    int score = 0;
+    if (tgtColor == board->oppColor()) {
+        // 吃子优先：高价值受害者、低价值攻击者更靠前。
+        score += 100000;
+        score += pieceValue[tgtType] * 16;
+        score -= pieceValue[srcType];
+    }
+
+    // 轻微中心偏好，帮助稳定排序。
+    const int centerBias = 4 - std::abs(4 - mv.target_x);
+    score += centerBias;
+
+    return score;
+}
+
+void ChessAI::fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target, int depthHint){
+    const int HeavyEvalDepthThreshold = 8;
+    const bool useHeavyEval = (depthHint >= HeavyEvalDepthThreshold);
+
+    for(auto& M : target){
+        nodes.push_back({M,-1});
+    }
+    for(auto& M : nodes){
+        if (useHeavyEval) {
+            M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+        } else {
+            M.value = this->fast_move_heuristic(M.strategy);
+        }
+    }
+    this->MoveNodesort(nodes);
+}
+
+//根据当前对于局面的评分函数，针对当前的Move进行评分，降序排列
+bool MoveNodecmp(const MoveNode& Nodex, const MoveNode& Nodey) {
+    return Nodex.value > Nodey.value;
+}
+
+void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
+    //快速排序 vector<MoveNode> 
+    sort(nodes.begin(), nodes.end(), MoveNodecmp);
+}
+void ChessAI::MoveNodeFront(MoveNode& tmpmove){
+    // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
+    board->makeMoveAssumeLegal(tmpmove.strategy);
+}
+// 对应撤销走法
+void ChessAI::MoveNodeBack(MoveNode& tmpmove){
+    this->board->undoMove();
+}
+
+struct MoveGuard {
+    ChessAI* ai;
+    MoveNode& node;
+    MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
+    ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
+//该步是否获得胜利
+bool ChessAI::getWin(){
+    auto& tmpstate = this->board->state[board->currTurnId];
+    for(auto& s : tmpstate){
+        if(s.color == board->currColor && s.type == King){
+            return false;
+        }
+    }
+    return true;
+}
+
+//初始化min max值
+const int minstateval = -9999999;
+const int maxstateval = 9999999;
+//着重考虑selected等全局变量应该如何处理
+void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
+    int max_depth = 10;  //最大搜素深度
+    int alpha = minstateval;
+    int beta = maxstateval;
+
+    //当前所有合法的着法
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    //selected初始化 
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;      //初始值赋值成极小值
+        selected.push_back(newMoveNode);
+    }
+
+    //不要忘记预先评价
+    MoveNodesort(selected);
+
+    // 搜索计时从根节点开始
+    searchTime.start();
+
+    //类似DFS —— 对深层的每一个着法进行探索并记录评分
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+                
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
+
+            //更新alpha
+            if(Node.value > alpha){
+                alpha = Node.value;
+            }
+        }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+
+    //select 降序大根堆
+}
+
+void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
+    int max_depth = 10;
+    int alpha = minstateval;
+    int beta = maxstateval;
+  
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;
+        selected.push_back(newMoveNode);
+    }
+
+    MoveNodesort(selected);
+
+    // 搜索计时从根节点开始
+    searchTime.start();
+
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
+
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
+
+            //更新alpha
+            if(Node.value > alpha){
+                alpha = Node.value;
+            }
+        }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+}
+
+//alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
+
+int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
+    searchTime.check();
+
+    if (depth == 0) { 
+        // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
+        return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+    }
+
+    if(getWin()){
+        return 999999; 
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves, depth);
+    for(auto& node : tmpMoveNodes){
+        int val;
+        {
+            MoveGuard guard(this, node);
+            val = -alpha_beta_search(depth - 1,-beta,-alpha);
+        }
+        
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+        }
+    }
+    return alpha;
+}
+//克服水平线效应————直到局面“稳定”，没有吃子再停止搜索
+
+//Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
+int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
+    searchTime.check();
+
+    bool foundPV = false;
+    if(depth == 0){
+        return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+    }
+
+    if(getWin()){
+        return 999999;
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves, depth);
+    int val;
+    for(auto& node : tmpMoveNodes){
+        {
+            MoveGuard guard(this, node);
+            if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
+                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
+                if((val > alpha) && (val < beta)){ //本区间内检查失败！
+                    val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+                }
+            }else{
+                val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+            }
+        }
+
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+            foundPV = true;
+        }
+    }
+    return alpha;
+}
+
+
+bool ChessAI::havethreat(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            if(tmp[board->xy2pos(x,y)].color == color && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            auto tmptype = tmp[board->xy2pos(x,y)].type;
+            bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
+            if(tmp[board->xy2pos(x,y)].color == color && is_important && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+
+//PVS算法
+//判断此次下子是否吃子  判断此棋子是否有吃子的机会
+//吃子的估值
+//非吃子的估值
+
+
+    // for (int y = 9; y >= 0; y--)
+    // {
+    //     for (int x = 0; x <= 8; x++)
+    //     {
+    //         std::cout << stoneSym[state[currTurnId][xy2pos(x, y)].type] << " ";
+    //     }
+    //     std::cout << std::endl;
+    // }
+
+//使用PSW进行搜索 —— 需要合适的MoveSort，否则"假设后面节点都不如A，再验证"意义不大！
+
+
 
 
 //考虑在开局中局残局时各个棋子处境与价值可能完全不同

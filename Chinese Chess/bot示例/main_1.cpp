@@ -6,10 +6,11 @@
 #include <cassert>
 #include <algorithm>
 #include <vector>
-#include <time.h>
 #include <stdexcept>
+#include <time.h>
 #include "jsoncpp/json.h"
 #include <queue>
+#include <utility>
 
 using std::cin;
 using std::cout;
@@ -17,6 +18,7 @@ using std::endl;
 using std::map;
 using std::string;
 using std::vector;
+using std::pair;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度
@@ -81,6 +83,47 @@ char int2char(int i)
     return (char)((int)'0' + i);
 }
 
+class TimeOutException : public std::runtime_error
+{
+public:
+    TimeOutException() : std::runtime_error("Time limit exceeded") {}
+};
+
+class SearchTime
+{
+private:
+    clock_t startTime;
+    int timeLimit_ms; // 毫秒
+    int checkerCount;
+
+public:
+    SearchTime(int limit_ms = 900) : startTime(0), timeLimit_ms(limit_ms), checkerCount(0) {}
+
+    void setLimitMs(int limit_ms)
+    {
+        timeLimit_ms = limit_ms;
+    }
+
+    void start()
+    {
+        startTime = clock();
+        checkerCount = 0;
+    }
+
+    inline void check()
+    {
+        if (checkerCount++ % 1024 == 0) // 每1024次检查一次时间
+        {
+            clock_t currentTime = clock();
+            double durationTime_ms = double(currentTime - startTime) / CLOCKS_PER_SEC * 1000;
+            if (durationTime_ms > timeLimit_ms)
+            {
+                throw TimeOutException();
+            }
+        }
+    }
+};
+
 struct Move
 {
     int source_x, source_y, target_x, target_y;
@@ -111,11 +154,11 @@ struct Move
 //数学理论上，是根据状态构建博弈树，实际上使用着法节点构成博弈树 —— 避免程序过大的开销
 struct MoveNode
 {
-    Move *strategy;
-    int value;
+    Move strategy;
+    int value = -1; //初始值为-1
     bool operator==(const MoveNode &other)
     {
-        return *(this->strategy) == *(other.strategy);
+        return (this->strategy) == (other.strategy);
     }
 };
 
@@ -155,6 +198,7 @@ public:
     void resetBoard();                                                                 // 重置棋盘为初始状态
     void generateMoves(vector<Move> &legalMoves, bool mustDefend = true);              // 生成常规合法移动步
     void generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend = true); // 生成包含禁手规则的合法移动步
+    void generateMoveNodesWithForbidden(vector<MoveNode> &legalNodes, bool mustDefend = true);  //新增————生成合法MoveNode
     bool repeatAfterMove(const Move &move);                                            // 判断移动后是否出现长将/长捉等重复局面
     static bool inBoard(int mx, int my);                                               // 判断坐标是否在棋盘内
     static bool inKingArea(int mx, int my, colorType mcolor);                          // 判断是否在九宫格内
@@ -182,7 +226,6 @@ public:
     static int pos2x(int mpos);                                                        // 一维索引转X坐标
     static int pos2y(int mpos);                                                        // 一维索引转Y坐标
     void printBoard();                                                                 // 打印当前棋盘
-    colorType getCurrColor() const;                                                    // 获取当前行动方
 
     bool isattacked(colorType color, int mx, int my);
 };
@@ -200,14 +243,16 @@ public:
     vector<Grid> curstones;
     vector<bool> curattacked;
     
-    bool isattacked(colorType color, int mx, int my);          //(对方的棋子颜色，我方的棋子位置x y) 我方位于mx my点的棋子是否可能被吃
-    bool hasattackchance(int mx,int my);                       //当前位于x y处的棋子是否有吃子的可能
-    bool ismiddlecompostion(vector<Grid>& target);             //是否为中局 / 残局
-    int calstaticstate(vector<Grid> &target, colorType color); //根据当前局面(Grid)，得到当前静态局面评分
-    int caldynamicstate(vector<Grid> &target, colorType color);//根据当前局面(Grid), 得到当前动态局面评分
-    int calstate(vector<Grid>& target,colorType color);        //计算出当前局面的总得分
-    void getGridcontrol();                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
+    bool isattacked(colorType color, int mx, int my);                          //(对方的棋子颜色，我方的棋子位置x y) 某一方方位于mx my点的棋子是否可能被吃
+    bool hasattackchance(int mx,int my);                                       //当前位于x y处的棋子是否有吃子的可能
+    bool ismiddlecompostion(vector<Grid>& target);                             //是否为中局 / 残局
+    int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
+    int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
+    int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
+
+    
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
@@ -218,49 +263,39 @@ public:
     // ChessAI属性 —— 由棋局状态 、 评估结构体组成
     Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
-
-    vector<Move> curlegalmoves; //由chess产生，当前合法的状态
-    vector<Move> eatenmoves;    //"死手"——产生吃子的着棋
-    vector<Move> plainmoves;    //"白手"——不产生吃子的着棋
-
-    vector<Move> selected;      //经过估值和搜素，最终得到的最佳移动策略
+    
+    vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
+    vector<MoveNode> eatenmoves;    //"死手"——产生吃子的着棋    ———————— 这里可能需要再次打分~
+    vector<MoveNode> plainmoves;    //"白手"——不产生吃子的着棋
+    vector<MoveNode> select;      //经过处理后的Move方法
+    SearchTime searchTime;          // 搜索计时器
 
     // ChessAI方法
+    bool getWin();                                                            //更新isWin,判断是否胜利
     void getcurstones(void);
-    void generateMovesWithForbidden();                         //对应board的同名方法
-    void getdiffmoves();                                       //得到吃子 / 非吃子 着棋
-    int alpha_beta_search();                                   //alpha-beta剪枝，获得最佳得分
-    void Movesort();                                           //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void generateMovesWithForbidden();                                        //对应board的同名方法
+    void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
+    int alpha_beta_search();                                                  //alpha-beta剪枝，获得最佳得分
+    void fillinMoveNodes(vector<MoveNode>& nodes);                            //将博弈树的MoveNodes节点进行赋值，并排序
+    void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target); //对某层的MoveNodes节点从target填充并排序
+    void MoveNodesort(vector<MoveNode>& nodes);                               //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeFront(MoveNode& tmpmove);                                    //(用于博弈树的向下遍历) ———— 进行当前的着法 
+    //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
+    void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
+    
+    //将搜索入口和搜索体相互剥离
+    void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
+    int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
+    void alpha_beta_PVS_select(vector<MoveNode>& selected);                   //alpha_beta_PMV 搜索入口
+    int alpha_beta_PVS_search(int depth,int alpha,int beta);                      //alpha_beta_PMV 搜索函数
+    bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
+    bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
 
     ChessAI();
     ~ChessAI();
 };
 void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
 void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
-void giveOutputTime(Chess &chess);    // 向Botzone平台输出落子(限时搜索)
-
-class TimeOutException : public std::runtime_error
-{
-public:
-    TimeOutException() : std::runtime_error("Time out") {}
-};
-
-clock_t startTime;
-const int TIME_LIMIT_MS = 900; // 安全及时900ms
-
-inline void checkTime()
-{
-    clock_t now = clock(); // 转换为毫秒
-    int duration_ms = (now - startTime) * 1000 / CLOCKS_PER_SEC;
-
-    if (duration_ms > TIME_LIMIT_MS)
-    {
-        throw TimeOutException(); // 超时直接抛出异常，打断搜索
-    }
-}
-
-void sortMoves(Chess &chess, vector<Move> &moves);
-int alphaBetaSearch(Chess &chess, int depth, int alpha, int beta, bool isRedTurn);
 
 int main()
 {
@@ -273,96 +308,6 @@ int main()
 // 向Botzone平台输出落子的函数定义
 void giveOutputBotzone(Chess &chess)
 {
-    giveOutputTime(chess);
-}
-
-void sortMoves(Chess &chess, vector<Move> &moves)
-{
-    std::stable_sort(moves.begin(), moves.end(), [&](const Move &a, const Move &b) {
-        bool aWin = chess.winAfterMove(a);
-        bool bWin = chess.winAfterMove(b);
-        if (aWin != bWin)
-        {
-            return aWin > bWin;
-        }
-        bool aCheck = chess.isOppKingAttackedAfterMove(a);
-        bool bCheck = chess.isOppKingAttackedAfterMove(b);
-        return aCheck > bCheck;
-    });
-}
-
-int alphaBetaSearch(Chess &chess, int depth, int alpha, int beta, bool isRedTurn)
-{
-    checkTime();
-    vector<Move> legalMoves;
-    chess.generateMovesWithForbidden(legalMoves);
-
-    if (legalMoves.empty())
-    {
-        return isRedTurn ? -1 : 100;
-    }
-    if (depth == 0)
-    {
-        return 0;
-    }
-
-    sortMoves(chess, legalMoves);
-
-    if (isRedTurn)
-    {
-        int bestScore = -1;
-        for (const Move &move : legalMoves)
-        {
-            checkTime();
-            chess.makeMoveAssumeLegal(move);
-            int score = alphaBetaSearch(chess, depth - 1, alpha, beta, false);
-            chess.undoMove();
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-            }
-            if (bestScore > alpha)
-            {
-                alpha = bestScore;
-            }
-            if (alpha >= beta)
-            {
-                break;
-            }
-        }
-        return bestScore;
-    }
-
-    int bestScore = 100;
-    for (const Move &move : legalMoves)
-    {
-        checkTime();
-        chess.makeMoveAssumeLegal(move);
-        int score = alphaBetaSearch(chess, depth - 1, alpha, beta, true);
-        chess.undoMove();
-
-        if (score < bestScore)
-        {
-            bestScore = score;
-        }
-        if (bestScore < beta)
-        {
-            beta = bestScore;
-        }
-        if (alpha >= beta)
-        {
-            break;
-        }
-    }
-    return bestScore;
-}
-
-void giveOutputTime(Chess &chess)
-{
-    // 记录开始时间
-    startTime = clock();
-
     vector<Move> retMoves;
     chess.generateMovesWithForbidden(retMoves);
     Json::Value ret;
@@ -374,60 +319,11 @@ void giveOutputTime(Chess &chess)
     }
     else
     {
-        bool isRedTurn = (chess.getCurrColor() == RED);
-        Move globalBestMove = retMoves[0]; // 最佳走法
-
-        // 加深搜索
-        try
-        {
-            for (int depth = 1; depth <= 30; ++depth)
-            {
-                checkTime();
-                Move currentDepthBestMove = retMoves[0];
-                int bestScore = isRedTurn ? -1 : 100;
-
-                sortMoves(chess, retMoves); // 顶层排序
-
-                for (const Move &move : retMoves)
-                {
-                    checkTime();
-                    chess.makeMoveAssumeLegal(move);
-                    int score = alphaBetaSearch(chess, depth - 1, -1, 100, !isRedTurn);
-                    chess.undoMove();
-
-                    if (isRedTurn)
-                    {
-                        if (score > bestScore)
-                        {
-                            bestScore = score;
-                            currentDepthBestMove = move;
-                        }
-                    }
-                    else
-                    {
-                        if (score < bestScore)
-                        {
-                            bestScore = score;
-                            currentDepthBestMove = move;
-                        }
-                    }
-                }
-
-                // 搜索完这一层更新最佳走法
-                globalBestMove = currentDepthBestMove;
-                if (bestScore > 90 || bestScore < -90)
-                {
-                    break; // kill提前结束
-                }
-            }
-        }
-        catch (const TimeOutException &e)
-        {
-            // 超时，跳出循环，使用上一层得到的globalBestMove
-        }
-
-        ret["response"]["source"] = string(1, pgnint2char(globalBestMove.source_x)) + string(1, int2char(globalBestMove.source_y));
-        ret["response"]["target"] = string(1, pgnint2char(globalBestMove.target_x)) + string(1, int2char(globalBestMove.target_y));
+        srand(time(nullptr));
+        int choice = rand() % retMoves.size();
+        auto selMove = retMoves[choice];
+        ret["response"]["source"] = string(1, pgnint2char(selMove.source_x)) + string(1, int2char(selMove.source_y));
+        ret["response"]["target"] = string(1, pgnint2char(selMove.target_x)) + string(1, int2char(selMove.target_y));
     }
     Json::FastWriter writer;
     cout << writer.write(ret) << endl;
@@ -1217,12 +1113,8 @@ colorType Chess::oppColor(colorType mcolor)
     return mcolor == RED ? BLACK : RED;
 }
 
-colorType Chess::getCurrColor() const
-{
-    return currColor;
-}
-
 // 撤销落子并恢复系统至上一步状态的函数定义
+// 注意先前的状态均需要改变
 void Chess::undoMove()
 {
     if (currTurnId == 0)
@@ -1250,6 +1142,8 @@ void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend
         }
     }
 }
+
+
 
 // 评估某步移动后是否会导致达到三次重复局面的函数定义
 bool Chess::repeatAfterMove(const Move &move)
@@ -1468,7 +1362,7 @@ bool EvalRecord::isattacked(colorType color, int mx, int my)
 
 void ChessAI::generateMovesWithForbidden()
 {
-    board->generateMovesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
+    board->generateMoveNodesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
     //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
 }
 
@@ -1476,7 +1370,7 @@ void ChessAI::getdiffmoves()
 {
     for (auto &s : this->curlegalmoves)
     {
-        if (board->state[board->currTurnId][board->xy2pos(s.target_x, s.target_y)].color == board->oppColor())
+        if (board->state[board->currTurnId][board->xy2pos(s.strategy.target_x, s.strategy.target_y)].color == board->oppColor())
         {
             this->eatenmoves.push_back(s);
         }
@@ -1488,6 +1382,7 @@ void ChessAI::getdiffmoves()
 }
 
 ChessAI::ChessAI()
+    : searchTime(900)
 {
     this->board = new Chess();
     this->evaluator.copyBoard(this->board);
@@ -2156,10 +2051,278 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //自身增量减去对方增量
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
-//根据当前对于局面的评分函数，针对当前的Move进行评分
+
+//填充MoveNode，并排序
+void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
+void ChessAI::fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target){
+    for(auto& M : target){
+        nodes.push_back({M,-1});
+    }
+    for(auto& M : nodes){
+        M.value = this->evaluator.calcurmove(M.strategy, board->state[board->currTurnId], board->currColor);
+    }
+    this->MoveNodesort(nodes);
+}
+
+//根据当前对于局面的评分函数，针对当前的Move进行评分，降序排列
+bool MoveNodecmp(const MoveNode& Nodex, const MoveNode& Nodey) {
+    return Nodex.value > Nodey.value;
+}
+
+void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
+    //快速排序 vector<MoveNode> 
+    sort(nodes.begin(), nodes.end(), MoveNodecmp);
+}
+void ChessAI::MoveNodeFront(MoveNode& tmpmove){
+    // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
+    board->makeMoveAssumeLegal(tmpmove.strategy);
+}
+// 对应撤销走法
+void ChessAI::MoveNodeBack(MoveNode& tmpmove){
+    this->board->undoMove();
+}
+
+struct MoveGuard {
+    ChessAI* ai;
+    MoveNode& node;
+    MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
+    ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
+//该步是否获得胜利
+bool ChessAI::getWin(){
+    auto& tmpstate = this->board->state[board->currTurnId];
+    for(auto& s : tmpstate){
+        if(s.color == board->currColor && s.type == King){
+            return false;
+        }
+    }
+    return true;
+}
+
+//初始化min max值
+const int minstateval = -9999999;
+const int maxstateval = 9999999;
+//着重考虑selected等全局变量应该如何处理
+void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
+    int max_depth = 10;  //最大搜素深度
+    int alpha = minstateval;
+    int beta = maxstateval;
+
+    //当前所有合法的着法
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    //selected初始化 
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;      //初始值赋值成极小值
+        selected.push_back(newMoveNode);
+    }
+
+    //不要忘记预先评价
+    MoveNodesort(selected);
+
+    // 搜索计时从根节点开始
+    searchTime.start();
+
+    //类似DFS —— 对深层的每一个着法进行探索并记录评分
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+                
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
+
+            //更新alpha
+            if(Node.value > alpha){
+                alpha = Node.value;
+            }
+        }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+
+    //select 降序大根堆
+}
+
+void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
+    int max_depth = 10;
+    int alpha = minstateval;
+    int beta = maxstateval;
+  
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+
+    selected.clear();
+    for(auto& M : tmpMoves){
+        MoveNode newMoveNode;
+        newMoveNode.strategy = M;
+        newMoveNode.value = alpha;
+        selected.push_back(newMoveNode);
+    }
+
+    MoveNodesort(selected);
+
+    // 搜索计时从根节点开始
+    searchTime.start();
+
+    try {
+        for(auto& Node : selected){
+            searchTime.check();
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
+
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
+
+            //更新alpha
+            if(Node.value > alpha){
+                alpha = Node.value;
+            }
+        }
+    } catch (const TimeOutException &) {
+        // 超时时保留当前已经评估出的最佳结果
+    }
+
+    sort(selected.begin(),selected.end(),MoveNodecmp);
+}
+
+//alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
+
+int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
+    searchTime.check();
+
+    if (depth == 0) { 
+        // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
+        return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+    }
+
+    if(getWin()){
+        return 999999; 
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+    for(auto& node : tmpMoveNodes){
+        int val;
+        {
+            MoveGuard guard(this, node);
+            val = -alpha_beta_search(depth - 1,-beta,-alpha);
+        }
+        
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+        }
+    }
+    return alpha;
+}
+//克服水平线效应————直到局面“稳定”，没有吃子再停止搜索
+
+//Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
+int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
+    searchTime.check();
+
+    bool foundPV = false;
+    if(depth == 0){
+        return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+    }
+
+    if(getWin()){
+        return 999999;
+    }
+
+    // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);
+    
+    // （如有死局则返回极小的评估值，代表被将死）
+    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+
+    vector<MoveNode> tmpMoveNodes;
+    this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+    int val;
+    for(auto& node : tmpMoveNodes){
+        {
+            MoveGuard guard(this, node);
+            if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
+                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
+                if((val > alpha) && (val < beta)){ //本区间内检查失败！
+                    val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+                }
+            }else{
+                val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+            }
+        }
+
+        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            return beta;
+        }
+        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+            alpha = val;
+            foundPV = true;
+        }
+    }
+    return alpha;
+}
 
 
+bool ChessAI::havethreat(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            if(tmp[board->xy2pos(x,y)].color == color && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
 
+    return false;
+}
+
+bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            auto tmptype = tmp[board->xy2pos(x,y)].type;
+            bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
+            if(tmp[board->xy2pos(x,y)].color == color && is_important && evaluator.isattacked(board->oppColor(),x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+
+//PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
 //非吃子的估值
@@ -2175,150 +2338,3 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     // }
 
 //使用PSW进行搜索 —— 需要合适的MoveSort，否则"假设后面节点都不如A，再验证"意义不大！
-
-
-/*ＰＶＳ算法，
-也称最小窗口搜索算法，是由 ａｌｐｈａ－ｂｅｔａ变形而来。
-两者间的主要区别就在于：除了主变量外的其它节
-点都进行零窗口搜索，并且把 α的值复制为 β的
-值，通常情况下都是把每个节点的所有子节点进行
-排序，同时假设第一个节点是最好的，作为主变量，
-进行全窗口搜索。通过零窗口搜索，判断是否存在
-αβ的值，在此基础上进行博弈树的剪枝。其中，
-对节点进行排序是该算法至为关键的一步，这样大
-大提高了搜索效率。所以本文采用了置换表和哈希
-表、历史启发增强、迭代深化等方法，极大地提高了
-算法的搜索效率［８］
-。
-在搜索过程中，还增加了置换表和哈希表，如果
-计算过的价值，将会加入 Ｈａｓｈ表，并通过查找的方
-法判断是否存在，如果存在就直接调用价值，这样也
-大大加快了搜索过程；采用了历史启发方法增强通
-过已有的节点评分可更好地进行排序［９］
-，价值高的
-节点排在前面，极大提高了搜索效率；与此同时，还
-通过迭代深化来加快节点排序的过程，过程中也一
-并进行时间的控制。在此基础上，改进的 ＰＶＳ算法
-的伪码参见如下。*/
-/*ＦｕｎｃｔｉｏｎＰＶＳ（ｉｎｔｄｅｐｔｈ，ｉｎｔａｌｐｈａ，ｉｎｔｂｅｔａ）｛
-ｉｆ（ｄｅｐｔｈ＜＝０）
-ｒｅｔｕｒｎｖａｌｕｅ（）
-ｇｅｎｅｒａｔｅＡｌｌＭｏｖｅ（）
-ｓｏｒｔ（）
-ｍａｋｅＭｏｖｅ（）
-ｂｅｓｔ＝－ＰＶＳ（ｄｅｐｔｈ－１，－ｂｅｔａ，－ａｌｐｈａ）
-ｕｎＭａｋｅＭｏｖｅ（）
-ｆｏｒ（ｍｏｖｅｉ＝１ｔｏｍｏｖｅ．ｓｉｚｅ（））
-ｉｆ（ｂｅｓｔ＜ｂｅｔａ）
-ｉｆ（ｂｅｓｔ＞ａｌｐｈａ）
-ａｌｐｈａ＝ｂｅｓｔ
-ｍａｋｅＭｏｖｅ（）
-ｖ＝－ＰＶＳ（ｄｅｐｔｈ－１，－ａｌｐｈａ－１，
-－ａｌｐｈａ）
-ｉｆ（ｖ＜ｂｅｔａ＆＆ｖ＞ａｌｐｈａ）
-ｂｅｓｔ＝－ＰＶＳ（ｄｅｐｔｈ－１，－ｂｅｔａ，－ｖ）
-ｉｆ（ｖ＞ｂｅｓｔ）
-ｂｅｓｔ＝ｖ
-ｕｎＭａｋｅＭｏｖｅ（）
-ｒｅｔｕｒｎｂｅｓｔ
-｝
-*/
-
-/*智能指针是C++11引入的一种用于管理动态内存的工具。它们通过自动释放内存来避免内存泄漏和野指针问题。智能指针主要有三种类型：unique_ptr、shared_ptr和weak_ptr。
-
-unique_ptr
-
-unique_ptr是一种独占所有权的智能指针，意味着同一时间只能有一个unique_ptr指向某个对象。它不能被复制，但可以通过std::move转移所有权。
-
-#include <iostream>
-#include <memory>
-
-class Test {
-public:
-Test() { std::cout << "Test的构造函数...\n"; }
-~Test() { std::cout << "Test的析构函数...\n"; }
-void doSomething() { std::cout << "do something...\n"; }
-};
-
-int main() {
-std::unique_ptr<Test> t1 = std::make_unique<Test>();
-t1->doSomething();
-std::unique_ptr<Test> t2 = std::move(t1);
-t2->doSomething();
-return 0;
-}
-复制
-shared_ptr
-
-shared_ptr是一种共享所有权的智能指针，多个shared_ptr可以指向同一个对象。当最后一个shared_ptr被销毁时，对象才会被释放。
-
-#include <iostream>
-#include <memory>
-
-class Test {
-public:
-Test() { std::cout << "Test的构造函数...\n"; }
-~Test() { std::cout << "Test的析构函数...\n"; }
-};
-
-int main() {
-std::shared_ptr<Test> sp1 = std::make_shared<Test>();
-std::shared_ptr<Test> sp2 = sp1;
-std::cout << "sp1 use_count: " << sp1.use_count() << "\n";
-std::cout << "sp2 use_count: " << sp2.use_count() << "\n";
-return 0;
-}
-复制
-weak_ptr
-
-weak_ptr是一种弱引用智能指针，它不影响所指对象的生命周期。weak_ptr可以从shared_ptr或另一个weak_ptr构造。
-
-#include <iostream>
-#include <memory>
-
-class Test {
-public:
-Test() { std::cout << "Test的构造函数...\n"; }
-~Test() { std::cout << "~Test的析构函数...\n"; }
-};
-
-int main() {
-std::shared_ptr<Test> sp = std::make_shared<Test>();
-std::weak_ptr<Test> wp = sp;
-if (auto spt = wp.lock()) {
-std::cout << "sp use_count: " << spt.use_count() << "\n";
-} else {
-std::cout << "对象已被释放\n";
-}
-return 0;
-}
-复制
-使用陷阱
-
-使用智能指针时需要注意避免循环引用问题。例如，两个对象相互引用对方的shared_ptr，会导致内存无法释放。此时可以使用weak_ptr来打破循环引用。
-
-#include <iostream>
-#include <memory>
-
-class Girl;
-
-class Boy {
-public:
-std::shared_ptr<Girl> girlFriend;
-~Boy() { std::cout << "~Boy析构函数\n"; }
-};
-
-class Girl {
-public:
-std::weak_ptr<Boy> boyFriend;
-~Girl() { std::cout << "~Girl析构函数\n"; }
-};
-
-int main() {
-auto boy = std::make_shared<Boy>();
-auto girl = std::make_shared<Girl>();
-boy->girlFriend = girl;
-girl->boyFriend = boy;
-return 0;
-}
-*/
