@@ -11,7 +11,10 @@
 #include "jsoncpp/json.h"
 #include <queue>
 #include <utility>
+#include <cstdint>
+#include <random>
 
+using std::uint64_t;   //64位hash
 using std::cin;
 using std::cout;
 using std::endl;
@@ -38,11 +41,24 @@ enum colorType
     BLACK = 0,
     RED = 1,
     EMPTY = 2
-};                                                                                                                                                                                                                  // 阵营颜色枚举
+};
+
+enum HashFlag{
+    EXACT = 0, //准确值
+    ALPHA = 1, //上边界为Alpha(alpha型结点，评估分数很差)
+    BETA = 2   //下边界为Beta(beta型结点，评估分数很好)
+};
+
+// 阵营颜色枚举
 int baseLine[2] = {9, 0};                                                                                                                                                                                           // 红黑双方的底线Y坐标
 char stoneSym[] = "*kbnrpca";                                                                                                                                                                                       // 棋子类型对应的字符表示
 map<char, stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King}, {stoneSym[2], Bishop}, {stoneSym[3], Knight}, {stoneSym[4], Rook}, {stoneSym[5], Pawn}, {stoneSym[6], Cannon}, {stoneSym[7], Assistant}}; // 字符到棋子类型的映射枚举
 
+//Zobirst随机数表,在程序启动时启动一次
+//压缩存储 ———— 使用Zobrist哈希，用一个64位的整数就能唯一地代表一个复杂的象棋局面，记录棋盘上的状态。
+//局势一模一样，此时着棋方不同 ———— (ZobristTable,ZobristPlayer)可以唯一确定一个棋局！
+uint64_t ZobristTable[8][2][90];                   //静态只读数组，用于Zobrist运算 类型 颜色(0-RED 1-BLACK) 位置xy2pos(x,y),第y列，第x行
+uint64_t ZobristPlayer;                            //静态只读数，用于标识当前轮到谁走棋的随机数
 int dx[] = {-1, -1, -1, 0, 0, 1, 1, 1};            // 8个方向的X轴偏移（通用）
 int dy[] = {-1, 0, 1, -1, 1, -1, 0, 1};            // 8个方向的Y轴偏移（通用）
 int dx_ob[] = {-1, 1, -1, 1};                      // 士（仕）的斜向X轴偏移（4个对角方向）
@@ -58,6 +74,21 @@ int dx_bishop[] = {-2, -2, 2, 2};                  // 象（相）走“田”�
 int dy_bishop[] = {-2, 2, -2, 2};                  // 象（相）走“田”目的地的Y轴偏移
 int dx_bishop_eye[] = {-1, -1, 1, 1};              // 象（相）走“田”对应的塞象眼检查点X轴偏移
 int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”对应的塞象眼检查点Y轴偏移
+
+//类似于算法题目中的记忆化搜索 ———— 将先前搜索得到的节点存入置换表
+//初始化Zobrist随机数表和Zobrist 轮次标识
+void InitZobrist(){
+    std::mt19937_64 randomnum(time(0));
+
+    for(int type = 0;type < 8;type ++){
+        for(int color = 0;color < 2;color ++){
+            for(int pos = 0;pos < 90;pos ++){
+                ZobristTable[type][color][pos] = randomnum();
+            }
+        }
+    }
+    ZobristPlayer = randomnum();
+}
 
 // PGN字符横坐标转数值
 int pgnchar2int(char c)
@@ -183,6 +214,59 @@ struct Grid
     }
 }; // 描述棋盘上单个格子（当前包含的棋子类型和颜色）的数据结构
 
+//TTStateNode为置换表单条数据,置换表存储经过Zobirst计算的 的棋盘数据
+struct TTStateNode{
+    uint64_t zobrist_key;    //zobrist计算所得局面值
+    int depth;               //搜素深度
+    int score;               //评估分数
+    HashFlag flag;           //节点标志
+    Move best_move;          //最佳着法
+};
+
+//置换表本身
+const int TT_SIZE = 1048576; //1M个
+TTStateNode HashTable[TT_SIZE];
+
+
+bool probeHash(uint16_t key,int depth,int alpha,int beta,int &val,Move& bestMove){
+    TTStateNode& entry = HashTable[key & (TT_SIZE - 1)];
+
+    if(entry.zobrist_key == key){ //索引相同，但是棋盘不同，本key下已经存在棋盘状态存储，两个状态所在博弈树的深度不同
+        bestMove = entry.best_move;
+        
+        //记录的深度 >= 当前需要的深度，分数可信
+        if(entry.depth >= depth){
+            if(entry.flag == EXACT){
+                val = entry.score;
+                return true;
+            }
+            if(entry.flag == ALPHA && entry.score <= alpha){
+                val = alpha;
+                return true;     //alpha型的结点，上边界ALPHA比我当前alpha还差，剪枝
+            }
+            if(entry.flag == BETA && entry.score >= beta){
+                val = beta;
+                return true;     //同上，beta型的结点，下边界BETA比我当前还好，剪枝
+            }
+        }
+
+    }
+    return false;
+}
+
+//写入置换表
+void RecordHash(uint64_t key,int depth,int score,HashFlag flag,Move bestMove){
+    TTStateNode& entry = HashTable[key & (TT_SIZE - 1)];
+    //算法：优先保留更深的搜素结果
+    //entry = HashTable[key]，如果entry.zobrist_key != key,说明没有初始化
+    if(entry.zobrist_key != key || depth >= entry.depth){
+        entry.zobrist_key = key;
+        entry.depth = depth;
+        entry.score = score;
+        entry.flag = flag;
+        entry.best_move = bestMove;
+    } 
+}
 class Chess
 {
     friend class ChessAI; // ChessAI拥有调用Chess所有方法和属性的权限！
