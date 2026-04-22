@@ -2088,11 +2088,18 @@ void ChessAI::MoveNodeBack(MoveNode& tmpmove){
     this->board->undoMove();
 }
 
+struct MoveGuard {
+    ChessAI* ai;
+    MoveNode& node;
+    MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
+    ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
 //该步是否获得胜利
 bool ChessAI::getWin(){
     auto& tmpstate = this->board->state[board->currTurnId];
     for(auto& s : tmpstate){
-        if(s.color == board->oppColor() && s.type == King){
+        if(s.color == board->currColor && s.type == King){
             return false;
         }
     }
@@ -2131,17 +2138,18 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
     try {
         for(auto& Node : selected){
             searchTime.check();
-            MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
-
-            int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
-
-            MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
-            //将深层传回来的得分，记录到根节点的MoveNode属性中
-            Node.value = score;
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_search(max_depth - 1,-beta,-alpha);
+                
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
 
             //更新alpha
-            if(score > alpha){
-                alpha = score;
+            if(Node.value > alpha){
+                alpha = Node.value;
             }
         }
     } catch (const TimeOutException &) {
@@ -2177,17 +2185,18 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     try {
         for(auto& Node : selected){
             searchTime.check();
-            MoveNodeFront(Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+            
+            {
+                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
+                int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
 
-            int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
-
-            MoveNodeBack(Node); //局面撤回当前的move，相当于博弈树向上回溯一层
-            //将深层传回来的得分，记录到根节点的MoveNode属性中
-            Node.value = score;
+                //将深层传回来的得分，记录到根节点的MoveNode属性中
+                Node.value = score;
+            }
 
             //更新alpha
-            if(score > alpha){
-                alpha = score;
+            if(Node.value > alpha){
+                alpha = Node.value;
             }
         }
     } catch (const TimeOutException &) {
@@ -2220,10 +2229,12 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
-    for(auto node : tmpMoveNodes){
-        MoveNodeFront(node);
-        int val = -alpha_beta_search(depth - 1,-beta,-alpha);
-        MoveNodeBack(node);
+    for(auto& node : tmpMoveNodes){
+        int val;
+        {
+            MoveGuard guard(this, node);
+            val = -alpha_beta_search(depth - 1,-beta,-alpha);
+        }
         
         if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
             return beta;
@@ -2259,17 +2270,18 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
     int val;
-    for(auto node : tmpMoveNodes){
-        this->MoveNodeFront(node);
-        if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
-            val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
-            if((val > alpha) && (val < beta)){ //本区间内检查失败！
+    for(auto& node : tmpMoveNodes){
+        {
+            MoveGuard guard(this, node);
+            if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
+                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
+                if((val > alpha) && (val < beta)){ //本区间内检查失败！
+                    val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+                }
+            }else{
                 val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
             }
-        }else{
-            val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
         }
-        this->MoveNodeBack(node);
 
         if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
             return beta;
