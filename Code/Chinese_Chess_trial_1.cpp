@@ -2053,6 +2053,64 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
 
+/*
+int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color){
+    int score = 0;
+    
+    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
+    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
+
+    auto target_piece = curstate[target_pos].type;
+    auto source_piece = curstate[source_pos].type;
+
+    // 如果目标位置有敌方棋子（发生吃子）
+    if (target_piece != None) {
+        int target_val = 0;
+        int source_val = 0;
+
+        // 获取受害者价值 (MVV)
+        switch(target_piece) {
+            case King: target_val = 10000; break;
+            case Rook: target_val = 900; break;
+            case Cannon: target_val = 450; break;
+            case Knight: target_val = 400; break;
+            case Bishop: target_val = 200; break;
+            case Assistant: target_val = 200; break;
+            case Pawn: target_val = 100; break;
+            default: break;
+        }
+
+        // 获取攻击者价值 (LVA)
+        switch(source_piece) {
+            case King: source_val = 10000; break;
+            case Rook: source_val = 900; break;
+            case Cannon: source_val = 450; break;
+            case Knight: source_val = 400; break;
+            case Bishop: source_val = 200; break;
+            case Assistant: source_val = 200; break;
+            case Pawn: source_val = 100; break;
+            default: break;
+        }
+
+        // 确保排在不吃子的走法前面。
+        // target_val*10 确保受害者的价值占据绝对主导。
+        score = 10000 + target_val*10 - source_val;
+    }
+    
+    // 如果没有吃子，返回 0
+    return score;
+}
+*/
+//现有策略随着递归深度加深会导致速度严重下降
+//上面一个极简的MVV/LVA评估函数，时间复杂度O(1)确保吃子走法优先于不吃子走法，并在吃子走法中优先考虑高价值受害者和低价值攻击者的组合，分数生成应该采用更合适等等策略。
+//方案1：浅层保持全面评估，深层使用MVV/LVA评估以节省时间
+//方案2：将棋子价值进行排序，优先搜索高价值受害者的吃子走法，让关键子的棋布被优先搜索，避免时间浪费在低价值棋子上，在深度到达一定程度时可以考虑完全舍弃非关键棋子的搜索
+//方案3：在搜索中如果发现敌我双方分数差异过大，可以考虑提前剪枝，舍弃那些明显不利的走法
+//注意！第二种方案在评估阶段就进行可能导致被将军时严重忽略士相的保护步法，为防止该情况建议分支在排序中沉底而不是过早剪枝
+//注意！第三种方案需要谨慎使用，过早剪枝可能导致错过关键的防守或反击机会，建议设置一个合理的阈值，并结合其他评估指标进行判断，以避免过度剪枝导致的误判。
+//不建议三种方案同时启用，会使搜索异常复杂，建议使用单一或一种主导第二种辅助的方案
+
+
 //填充MoveNode，并排序
 void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
     for(auto& M : nodes){
@@ -2080,17 +2138,6 @@ void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
     //快速排序 vector<MoveNode> 
     sort(nodes.begin(), nodes.end(), MoveNodecmp);
 }
-
-void ChessAI::MoveNodeVoid(){
-    Move tmpmove;
-    //让棋局在此步原地踏步
-    tmpmove.target_x = 1;
-    tmpmove.target_x = 1;
-    tmpmove.target_y = 1;
-    tmpmove.target_y = 1;
-    board->makeMoveAssumeLegal(tmpmove);
-}
-
 void ChessAI::MoveNodeFront(MoveNode& tmpmove){
     // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
     board->makeMoveAssumeLegal(tmpmove.strategy);
@@ -2232,20 +2279,6 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         return 999999; 
     }
 
-    const int R = 2; // 深度缩减参数(Reduction)
-    if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
-        this->MoveNodeVoid(); // 执行空步
-
-        // 尝试一个零窗口探测计算空步后的局面价值
-        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
-
-        this->board->undoMove(); // 撤销空步
-
-        // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
-        if (null_val >= beta) {
-            return beta;
-        }
-    }
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
@@ -2284,23 +2317,6 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     if(getWin()){
         return 999999;
-    }
-
-    // 空步裁剪 
-    // 当前局面已经好到对手无法翻盘，本节点即可作为beta截断节点返回。
-    const int R = 2; // 深度缩减参数(Reduction)
-    if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
-        this->MoveNodeVoid(); // 执行空步
-
-        // 尝试一个零窗口探测计算空步后的局面价值
-        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
-
-        this->board->undoMove(); // 撤销空步
-
-        // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
-        if (null_val >= beta) {
-            return beta;
-        }
     }
 
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
