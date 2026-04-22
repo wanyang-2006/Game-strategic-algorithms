@@ -228,7 +228,7 @@ const int TT_SIZE = 1048576; //1M个
 TTStateNode HashTable[TT_SIZE];
 
 
-bool probeHash(uint16_t key,int depth,int alpha,int beta,int &val,Move& bestMove){
+bool probeHash(uint64_t key,int depth,int alpha,int beta,int &val,Move& bestMove){
     TTStateNode& entry = HashTable[key & (TT_SIZE - 1)];
 
     if(entry.zobrist_key == key){ //索引相同，但是棋盘不同，本key下已经存在棋盘状态存储，两个状态所在博弈树的深度不同
@@ -312,6 +312,9 @@ public:
     void printBoard();                                                                 // 打印当前棋盘
 
     bool isattacked(colorType color, int mx, int my);
+
+    //Zobrist Key计算方法 ———— 添加到Chess类中
+    uint64_t getZobristKey();
 };
 
 //局面评估类 包含评估的各个指标量(特征提取)和评估方法 
@@ -1289,6 +1292,29 @@ void Chess::printBoard()
 }
 
 //======================以下为添加的函数方法=======================\\
+
+//计算当前局面的 Zobrist Key
+uint64_t Chess::getZobristKey(){
+
+    uint64_t key = 0;
+    //棋盘格点遍历顺序无所谓
+    for(int x = 0;x < BOARDWIDTH;x ++){
+        for(int y = 0;y < BOARDHEIGHT; y++){
+            auto& curGrid = state[currTurnId][xy2pos(x,y)];
+            if(curGrid.type != None && curGrid.color != EMPTY){
+                int coloridx = (curGrid.color == RED) ? 0 : 1; //红0 黑1
+                key ^= ZobristTable[curGrid.type][coloridx][xy2pos(x,y)];
+            }
+        }
+    }
+    if(currColor == BLACK){
+        key ^= ZobristPlayer;
+    }
+
+    return key;
+}
+//在makeMoveAssumeLegal 和 undoMove中可以通过两次XOR抹去旧棋子，增加新棋子，不需要遍历全盘，可优化
+
 
 // 验证在禁手规则限制下某移动是否有效的函数定义
 bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
@@ -2418,6 +2444,16 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 //Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
 int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     searchTime.check();
+    
+    //获取当前的Zobrist Key
+    uint64_t curkey = this->board->getZobristKey();
+    int TT_val;
+    Move best_TT_Move;
+    best_TT_Move.source_x = -1; //未修改的标志位,供后面判断是否找到了best_TT_Move
+    //探测置换表(有无符合要求的已计算的置换表)
+    if(probeHash(curkey,depth,alpha,beta,TT_val,best_TT_Move)){
+        return TT_val; 
+    }
 
     bool foundPV = false;
     if(depth == 0){
@@ -2453,7 +2489,23 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+
+    //置换表着法启发(Transposition Table Ordering)
+    //原理：如果之前搜素过该局面，最佳着法会被保留，并强制将其提到第一位搜素
+    if(best_TT_Move.source_x != -1){
+        for(int i = 0;i < tmpMoveNodes.size();i ++){
+            if(tmpMoveNodes[i].strategy == best_TT_Move){
+                std::swap(tmpMoveNodes[0],tmpMoveNodes[i]);
+                break;
+            }
+        }
+    }
+
+    //记录TT 表中，所得到的最优节点
+    int original_alpha = alpha;
+    Move best_move; //当前节点探索出的最佳着法
     int val;
+
     for(auto& node : tmpMoveNodes){
         {
             MoveGuard guard(this, node);
@@ -2467,7 +2519,13 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             }
         }
 
+        if(val > alpha){
+            best_move = node.strategy;
+        }
+
         if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+            //beta剪枝，引发截断，记录为Beta节点
+            RecordHash(curkey,depth,beta,BETA,node.strategy);
             return beta;
         }
         if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
@@ -2475,6 +2533,10 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             foundPV = true;
         }
     }
+    //搜素完毕，未发生Beta剪枝。根据Alpha是否被更新，写入EXACT 或者 ALPHA
+    HashFlag flag = (alpha > original_alpha) ? EXACT : ALPHA;
+    RecordHash(curkey,depth,alpha,flag,best_move);
+
     return alpha;
 }
 
