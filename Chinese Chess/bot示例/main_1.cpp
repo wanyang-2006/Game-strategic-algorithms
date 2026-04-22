@@ -11,7 +11,10 @@
 #include "jsoncpp/json.h"
 #include <queue>
 #include <utility>
+#include <cstdint>
+#include <random>
 
+using std::uint64_t;   //64位hash
 using std::cin;
 using std::cout;
 using std::endl;
@@ -38,11 +41,24 @@ enum colorType
     BLACK = 0,
     RED = 1,
     EMPTY = 2
-};                                                                                                                                                                                                                  // 阵营颜色枚举
+};
+
+enum HashFlag{
+    EXACT = 0, //准确值
+    ALPHA = 1, //上边界为Alpha(alpha型结点，评估分数很差)
+    BETA = 2   //下边界为Beta(beta型结点，评估分数很好)
+};
+
+// 阵营颜色枚举
 int baseLine[2] = {9, 0};                                                                                                                                                                                           // 红黑双方的底线Y坐标
 char stoneSym[] = "*kbnrpca";                                                                                                                                                                                       // 棋子类型对应的字符表示
 map<char, stoneType> charSym = {{stoneSym[0], None}, {stoneSym[1], King}, {stoneSym[2], Bishop}, {stoneSym[3], Knight}, {stoneSym[4], Rook}, {stoneSym[5], Pawn}, {stoneSym[6], Cannon}, {stoneSym[7], Assistant}}; // 字符到棋子类型的映射枚举
 
+//Zobirst随机数表,在程序启动时启动一次
+//压缩存储 ———— 使用Zobrist哈希，用一个64位的整数就能唯一地代表一个复杂的象棋局面，记录棋盘上的状态。
+//局势一模一样，此时着棋方不同 ———— (ZobristTable,ZobristPlayer)可以唯一确定一个棋局！
+uint64_t ZobristTable[8][2][90];                   //静态只读数组，用于Zobrist运算 类型 颜色(0-RED 1-BLACK) 位置xy2pos(x,y),第y列，第x行
+uint64_t ZobristPlayer;                            //静态只读数，用于标识当前轮到谁走棋的随机数
 int dx[] = {-1, -1, -1, 0, 0, 1, 1, 1};            // 8个方向的X轴偏移（通用）
 int dy[] = {-1, 0, 1, -1, 1, -1, 0, 1};            // 8个方向的Y轴偏移（通用）
 int dx_ob[] = {-1, 1, -1, 1};                      // 士（仕）的斜向X轴偏移（4个对角方向）
@@ -58,6 +74,21 @@ int dx_bishop[] = {-2, -2, 2, 2};                  // 象（相）走“田”�
 int dy_bishop[] = {-2, 2, -2, 2};                  // 象（相）走“田”目的地的Y轴偏移
 int dx_bishop_eye[] = {-1, -1, 1, 1};              // 象（相）走“田”对应的塞象眼检查点X轴偏移
 int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”对应的塞象眼检查点Y轴偏移
+
+//类似于算法题目中的记忆化搜索 ———— 将先前搜索得到的节点存入置换表
+//初始化Zobrist随机数表和Zobrist 轮次标识
+void InitZobrist(){
+    std::mt19937_64 randomnum(time(0));
+
+    for(int type = 0;type < 8;type ++){
+        for(int color = 0;color < 2;color ++){
+            for(int pos = 0;pos < 90;pos ++){
+                ZobristTable[type][color][pos] = randomnum();
+            }
+        }
+    }
+    ZobristPlayer = randomnum();
+}
 
 // PGN字符横坐标转数值
 int pgnchar2int(char c)
@@ -183,6 +214,59 @@ struct Grid
     }
 }; // 描述棋盘上单个格子（当前包含的棋子类型和颜色）的数据结构
 
+//TTStateNode为置换表单条数据,置换表存储经过Zobirst计算的 的棋盘数据
+struct TTStateNode{
+    uint64_t zobrist_key;    //zobrist计算所得局面值
+    int depth;               //搜素深度
+    int score;               //评估分数
+    HashFlag flag;           //节点标志
+    Move best_move;          //最佳着法
+};
+
+//置换表本身
+const int TT_SIZE = 1048576; //1M个
+TTStateNode HashTable[TT_SIZE];
+
+
+bool probeHash(uint64_t key,int depth,int alpha,int beta,int &val,Move& bestMove){
+    TTStateNode& entry = HashTable[key & (TT_SIZE - 1)];
+
+    if(entry.zobrist_key == key){ //索引相同，但是棋盘不同，本key下已经存在棋盘状态存储，两个状态所在博弈树的深度不同
+        bestMove = entry.best_move;
+        
+        //记录的深度 >= 当前需要的深度，分数可信
+        if(entry.depth >= depth){
+            if(entry.flag == EXACT){
+                val = entry.score;
+                return true;
+            }
+            if(entry.flag == ALPHA && entry.score <= alpha){
+                val = alpha;
+                return true;     //alpha型的结点，上边界ALPHA比我当前alpha还差，剪枝
+            }
+            if(entry.flag == BETA && entry.score >= beta){
+                val = beta;
+                return true;     //同上，beta型的结点，下边界BETA比我当前还好，剪枝
+            }
+        }
+
+    }
+    return false;
+}
+
+//写入置换表
+void RecordHash(uint64_t key,int depth,int score,HashFlag flag,Move bestMove){
+    TTStateNode& entry = HashTable[key & (TT_SIZE - 1)];
+    //算法：优先保留更深的搜素结果
+    //entry = HashTable[key]，如果entry.zobrist_key != key,说明没有初始化
+    if(entry.zobrist_key != key || depth >= entry.depth){
+        entry.zobrist_key = key;
+        entry.depth = depth;
+        entry.score = score;
+        entry.flag = flag;
+        entry.best_move = bestMove;
+    } 
+}
 class Chess
 {
     friend class ChessAI; // ChessAI拥有调用Chess所有方法和属性的权限！
@@ -228,6 +312,9 @@ public:
     void printBoard();                                                                 // 打印当前棋盘
 
     bool isattacked(colorType color, int mx, int my);
+
+    //Zobrist Key计算方法 ———— 添加到Chess类中
+    uint64_t getZobristKey();
 };
 
 //局面评估类 包含评估的各个指标量(特征提取)和评估方法 
@@ -279,6 +366,7 @@ public:
     void fillinMoveNodes(vector<MoveNode>& nodes);                            //将博弈树的MoveNodes节点进行赋值，并排序
     void fill_sort_inMoveNodes(vector<MoveNode>& nodes,vector<Move>& target); //对某层的MoveNodes节点从target填充并排序
     void MoveNodesort(vector<MoveNode>& nodes);                               //着法排序，考虑使用priority_queue<Move,vector<Move(),cmp>
+    void MoveNodeVoid();                                                      //当前的棋步为空着
     void MoveNodeFront(MoveNode& tmpmove);                                    //(用于博弈树的向下遍历) ———— 进行当前的着法 
     //MoveNode的值为delta值，还原回上一棋着的值减去delta即可
     void MoveNodeBack(MoveNode& tmpmove);                                     //(用于博弈树的回溯) ———— 撤销当前的着法
@@ -1205,6 +1293,29 @@ void Chess::printBoard()
 
 //======================以下为添加的函数方法=======================\\
 
+//计算当前局面的 Zobrist Key
+uint64_t Chess::getZobristKey(){
+
+    uint64_t key = 0;
+    //棋盘格点遍历顺序无所谓
+    for(int x = 0;x < BOARDWIDTH;x ++){
+        for(int y = 0;y < BOARDHEIGHT; y++){
+            auto& curGrid = state[currTurnId][xy2pos(x,y)];
+            if(curGrid.type != None && curGrid.color != EMPTY){
+                int coloridx = (curGrid.color == RED) ? 0 : 1; //红0 黑1
+                key ^= ZobristTable[curGrid.type][coloridx][xy2pos(x,y)];
+            }
+        }
+    }
+    if(currColor == BLACK){
+        key ^= ZobristPlayer;
+    }
+
+    return key;
+}
+//在makeMoveAssumeLegal 和 undoMove中可以通过两次XOR抹去旧棋子，增加新棋子，不需要遍历全盘，可优化
+
+
 // 验证在禁手规则限制下某移动是否有效的函数定义
 bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
 {
@@ -2052,6 +2163,64 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
 
+/*
+int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color){
+    int score = 0;
+    
+    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
+    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
+
+    auto target_piece = curstate[target_pos].type;
+    auto source_piece = curstate[source_pos].type;
+
+    // 如果目标位置有敌方棋子（发生吃子）
+    if (target_piece != None) {
+        int target_val = 0;
+        int source_val = 0;
+
+        // 获取受害者价值 (MVV)
+        switch(target_piece) {
+            case King: target_val = 10000; break;
+            case Rook: target_val = 900; break;
+            case Cannon: target_val = 450; break;
+            case Knight: target_val = 400; break;
+            case Bishop: target_val = 200; break;
+            case Assistant: target_val = 200; break;
+            case Pawn: target_val = 100; break;
+            default: break;
+        }
+
+        // 获取攻击者价值 (LVA)
+        switch(source_piece) {
+            case King: source_val = 10000; break;
+            case Rook: source_val = 900; break;
+            case Cannon: source_val = 450; break;
+            case Knight: source_val = 400; break;
+            case Bishop: source_val = 200; break;
+            case Assistant: source_val = 200; break;
+            case Pawn: source_val = 100; break;
+            default: break;
+        }
+
+        // 确保排在不吃子的走法前面。
+        // target_val*10 确保受害者的价值占据绝对主导。
+        score = 10000 + target_val*10 - source_val;
+    }
+    
+    // 如果没有吃子，返回 0
+    return score;
+}
+*/
+//现有策略随着递归深度加深会导致速度严重下降
+//上面一个极简的MVV/LVA评估函数，时间复杂度O(1)确保吃子走法优先于不吃子走法，并在吃子走法中优先考虑高价值受害者和低价值攻击者的组合，分数生成应该采用更合适等等策略。
+//方案1：浅层保持全面评估，深层使用MVV/LVA评估以节省时间
+//方案2：将棋子价值进行排序，优先搜索高价值受害者的吃子走法，让关键子的棋布被优先搜索，避免时间浪费在低价值棋子上，在深度到达一定程度时可以考虑完全舍弃非关键棋子的搜索
+//方案3：在搜索中如果发现敌我双方分数差异过大，可以考虑提前剪枝，舍弃那些明显不利的走法
+//注意！第二种方案在评估阶段就进行可能导致被将军时严重忽略士相的保护步法，为防止该情况建议分支在排序中沉底而不是过早剪枝
+//注意！第三种方案需要谨慎使用，过早剪枝可能导致错过关键的防守或反击机会，建议设置一个合理的阈值，并结合其他评估指标进行判断，以避免过度剪枝导致的误判。
+//不建议三种方案同时启用，会使搜索异常复杂，建议使用单一或一种主导第二种辅助的方案
+
+
 //填充MoveNode，并排序
 void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
     for(auto& M : nodes){
@@ -2079,6 +2248,16 @@ void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
     //快速排序 vector<MoveNode> 
     sort(nodes.begin(), nodes.end(), MoveNodecmp);
 }
+void ChessAI::MoveNodeVoid(){
+    Move tmpmove;
+    //让棋局在此步原地踏步
+    tmpmove.target_x = 1;
+    tmpmove.target_x = 1;
+    tmpmove.target_y = 1;
+    tmpmove.target_y = 1;
+    board->makeMoveAssumeLegal(tmpmove);
+}
+
 void ChessAI::MoveNodeFront(MoveNode& tmpmove){
     // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
     board->makeMoveAssumeLegal(tmpmove.strategy);
@@ -2219,6 +2398,21 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     if(getWin()){
         return 999999; 
     }
+    const int R = 2; // 深度缩减参数(Reduction)
+    if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
+        this->MoveNodeVoid(); // 执行空步
+
+        // 尝试一个零窗口探测计算空步后的局面价值
+        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+
+        this->board->undoMove(); // 撤销空步
+
+        // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
+        if (null_val >= beta) {
+            return beta;
+        }
+    }
+
 
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
     vector<Move> tmpMoves;
@@ -2250,16 +2444,42 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 //Principal Variation ———— 主要变例，非Alpha 也非 Beta的节点,该类节点中可能找到更优节点
 int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     searchTime.check();
+    
+    //获取当前的Zobrist Key
+    uint64_t curkey = this->board->getZobristKey();
+    int TT_val;
+    Move best_TT_Move;
+    best_TT_Move.source_x = -1; //未修改的标志位,供后面判断是否找到了best_TT_Move
+    //探测置换表(有无符合要求的已计算的置换表)
+    if(probeHash(curkey,depth,alpha,beta,TT_val,best_TT_Move)){
+        return TT_val; 
+    }
 
     bool foundPV = false;
-    if(depth == 0){
+    if(depth <= 0){
         return evaluator.calstate(board->state[board->currTurnId],board->currColor);
     }
 
     if(getWin()){
         return 999999;
     }
+    
+    // 空步裁剪 
+    // 当前局面已经好到对手无法翻盘，本节点即可作为beta截断节点返回。
+    const int R = 2; // 深度缩减参数(Reduction)
+    if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
+        this->MoveNodeVoid(); // 执行空步
 
+        // 尝试一个零窗口探测计算空步后的局面价值
+        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+
+        this->board->undoMove(); // 撤销空步
+
+        // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
+        if (null_val >= beta) {
+            return beta;
+        }
+    }
     // 这里必须使用局部变量 储存合法的移动节点，不能用类的成员！否则会覆盖类中的原有数据
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
@@ -2269,28 +2489,62 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
+
+    //置换表着法启发(Transposition Table Ordering)
+    //原理：如果之前搜素过该局面，最佳着法会被保留，并强制将其提到第一位搜素
+    if(best_TT_Move.source_x != -1){
+        for(int i = 0;i < tmpMoveNodes.size();i ++){
+            if(tmpMoveNodes[i].strategy == best_TT_Move){
+                std::swap(tmpMoveNodes[0],tmpMoveNodes[i]);
+                break;
+            }
+        }
+    }
+
+    //记录TT 表中，所得到的最优节点
+    int original_alpha = alpha;
+    Move best_move; //当前节点探索出的最佳着法
     int val;
+
     for(auto& node : tmpMoveNodes){
         {
             MoveGuard guard(this, node);
+            
+            int extension = 0;
+            // 如果走完这步，重点棋子受威胁，强行多看一步
+            if(havethreat_of_valuestone(board->state[board->currTurnId], board->currColor)){
+                extension = 1; 
+            }
+
+
             if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
-                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
+                val = -alpha_beta_PVS_search(depth - 1+extension,-alpha - 1,- alpha);
                 if((val > alpha) && (val < beta)){ //本区间内检查失败！
-                    val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+                    val = -alpha_beta_PVS_search(depth - 1+extension,-beta,-alpha);
                 }
             }else{
-                val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
+                val = -alpha_beta_PVS_search(depth - 1+extension,-beta,-alpha);
             }
         }
 
-        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+        if(val > alpha){
+            best_move = node.strategy;
+        }
+
+        if(val >= beta){ //beta剪枝
+            //beta剪枝，引发截断，记录为Beta节点
+            RecordHash(curkey,depth,beta,BETA,node.strategy);
             return beta;
         }
-        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+        if(val > alpha){ //alpha剪枝
             alpha = val;
             foundPV = true;
         }
     }
+    //搜素完毕，未发生Beta剪枝。根据Alpha是否被更新，写入EXACT 或者 ALPHA
+    HashFlag flag = (alpha > original_alpha) ? EXACT : ALPHA;
+    RecordHash(curkey,depth,alpha,flag,best_move);
+
     return alpha;
 }
 
