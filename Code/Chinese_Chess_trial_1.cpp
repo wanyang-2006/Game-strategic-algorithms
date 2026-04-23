@@ -382,6 +382,7 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
+    int ChessAI::quiescence_search(int alpha, int beta) ;                      //静态搜索，解决水平线效应
 
     ChessAI();
     ~ChessAI();
@@ -2406,7 +2407,8 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 
     if (depth == 0) { 
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
-        return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+        //return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+        return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
     if(getWin()){
@@ -2471,7 +2473,8 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     bool foundPV = false;
     if(depth == 0){
-        return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+        //return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+        return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
     if(getWin()){
@@ -2647,6 +2650,74 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
     this->evaluator.getGridcontrol();
     return havethreat(board->state[board->currTurnId],board->currColor);
 }
+
+int ChessAI::quiescence_search(int alpha, int beta) {
+    searchTime.check();
+    int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);// 获取局面保底分数
+    
+    if (stand >= beta) 
+    {
+        return beta;//更新beta
+    }
+
+    if (stand > alpha) 
+    {
+        alpha = stand;//更新alpha
+    }
+
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves);//获取合法着法
+
+    vector<MoveNode> captureNodes;
+    auto& currState = board->state[board->currTurnId];
+    
+    for (const auto& m : tmpMoves) {
+        int targetPos = board->xy2pos(m.target_x, m.target_y);
+        stoneType victim = currState[targetPos].type;
+
+        if (victim != None) // 基于吃子着法
+        {
+            MoveNode node;
+            node.strategy = m;
+            
+            // 一个只基于被吃子价值的排序，建议在MVV/LVA 排序合并进项目且封装时换用MVV/LVA
+            int victim_val = 0;
+            switch (victim) {
+                case King:      victim_val = 10000; break;
+                case Rook:      victim_val = 900;   break;
+                case Cannon:    victim_val = 450;   break;
+                case Knight:    victim_val = 400;   break;
+                case Bishop:    victim_val = 200;   break;
+                case Assistant: victim_val = 200;   break;
+                case Pawn:      victim_val = 100;   break;
+                default:        victim_val = 0;     break;
+            }
+            node.value = victim_val; 
+            captureNodes.push_back(node);
+        }
+    }
+
+    // 降序排序
+    this->MoveNodesort(captureNodes);
+
+    // 遍历这些吃子着法，继续深入博弈树
+    for (auto& node : captureNodes) {
+        int val;
+        {
+            MoveGuard guard(this, node); // 着这步吃子棋
+            val = -quiescence_search(-beta, -alpha); 
+        }
+        if (val >= beta) {
+            return beta;
+        }
+        if (val > alpha) {
+            alpha = val;
+        }
+    }
+
+    return alpha;
+}//静态搜索实现暂时较为简单，预计把排序策略更换为MVV/LVA，未来可以加入置换表
+
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
