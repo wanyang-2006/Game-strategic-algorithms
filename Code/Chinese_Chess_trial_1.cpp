@@ -345,6 +345,7 @@ public:
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
+const int max_depth = 64;       //最大搜素深度
 //产生策略类
 class ChessAI
 {
@@ -361,7 +362,8 @@ public:
     vector<MoveNode> select;      //经过处理后的Move方法
     SearchTime searchTime;          // 搜索计时器
 
-    // ChessAI方法
+    Move killerMoves[max_depth][2];                            //杀手着法表，假设最大搜素深度为Max_Search_Depth 每层杀手着法数目设为2
+    // ChessAI方法                                      
     bool getWin();                                                            //更新isWin,判断是否胜利
     void getcurstones(void);
     void generateMovesWithForbidden();                                        //对应board的同名方法
@@ -2444,10 +2446,16 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 }
 
 void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
-    int max_depth = 10;
+
     int alpha = minstateval;
     int beta = maxstateval;
-  
+    
+    //搜素开始前，清空杀手着法表
+    for(int i = 0;i < max_depth;i ++){
+        killerMoves[i][0] = Move();   //默认构造
+        killerMoves[i][1] = Move();
+    }
+
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
 
@@ -2488,7 +2496,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     sort(selected.begin(),selected.end(),MoveNodecmp);
 }
 
-//alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
+//alpha —— beta 具体搜索函数 将函数入口和函数体相剥离
 
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     searchTime.check();
@@ -2597,16 +2605,41 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     //置换表着法启发(Transposition Table Ordering)
     //原理：如果之前搜素过该局面，最佳着法会被保留，并强制将其提到第一位搜素
+
+    //=====HashTable排序    =====\\
+
+
+    int next_idx = 0;
     if(best_TT_Move.source_x != -1){
         for(int i = 0;i < tmpMoveNodes.size();i ++){
             if(tmpMoveNodes[i].strategy == best_TT_Move){
+                //=========将置换表最佳着法和杀手着法提升到前列===========\\ : 都能以最小代价最快剪枝
                 std::swap(tmpMoveNodes[0],tmpMoveNodes[i]);
+                next_idx = 1;
                 break;
             }
         }
     }
+    //=====HashTable排序完成=====\\
 
-    //=====HashTable搜素完成=====\\
+    //=====杀手着法启发排序 =====\\
+    //检查本深度的两个杀手着法并将其提升到next_idx位(HashTable(prior) -> killerMove)
+    for(int k = 0;k < 2;k ++){
+        if(killerMoves[depth][k].source_x != -1){
+            //从next_idx开始
+            for(int i = next_idx;i < tmpMoveNodes.size();i ++){
+                if(tmpMoveNodes[i].strategy == killerMoves[depth][k]){
+                    std::swap(tmpMoveNodes[next_idx],tmpMoveNodes[i]);
+                    next_idx ++;
+                    break;
+                }
+            }
+        }
+    }
+    //=====杀手着法启发排序完成 =====\\
+
+
+
 
     //记录TT 表中，所得到的最优节点
     int original_alpha = alpha;
@@ -2619,10 +2652,9 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     int moveIndex = 0; //LMR ———— 当前是第几个着法
 
     for(auto& node : tmpMoveNodes){
+        bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
         {
             MoveGuard guard(this, node);
-
-            bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
 
             if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
 
@@ -2649,7 +2681,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             }else{
                 val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
             }
-        }
+        } //这里的括号用于限制MoveGuard作用域
 
         if(val > alpha){
             best_move = node.strategy;
@@ -2658,6 +2690,21 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         if(val >= beta){ //beta剪枝
             //beta剪枝，引发截断，记录为Beta节点
             RecordHash(curkey,depth,beta,BETA,node.strategy);
+            
+
+            //记录本层的杀手着法 
+            //===================杀手着法逻辑=====================\\
+
+            //当一个节点是的val >= beta，并且本着法为Quiet Move，将本着法记录 ———— 这说明着法具有巨大价值
+            //吃子着法本身价值高，待添加吃子排序先验。这里仅考虑白手着法
+
+            if(isQuiet){
+                if(!(killerMoves[depth][0] == node.strategy)){
+                    killerMoves[depth][1] = killerMoves[depth][0];
+                    killerMoves[depth][0] = node.strategy;
+                }
+            }
+
             return beta;
         }
 /*
