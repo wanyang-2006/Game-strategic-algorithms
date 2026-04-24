@@ -411,7 +411,7 @@ void writeMoveToJson(Json::Value& ret,Move& target){
     ret["response"]["source"] = 
         string(1,pgnint2char(target.source_x)) + string(1,int2char(target.source_y));
 
-    ret["response"]["source"] =
+    ret["response"]["target"] =
         string(1,pgnint2char(target.target_x)) + string(1,int2char(target.target_y));
 }
 
