@@ -77,8 +77,10 @@ int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”�
 
 //类似于算法题目中的记忆化搜索 ———— 将先前搜索得到的节点存入置换表
 //初始化Zobrist随机数表和Zobrist 轮次标识
+
+//构建开局库
 void InitZobrist(){
-    std::mt19937_64 randomnum(time(0));
+    std::mt19937_64 randomnum(20262026ULL);
 
     for(int type = 0;type < 8;type ++){
         for(int color = 0;color < 2;color ++){
@@ -348,7 +350,9 @@ class ChessAI
 {
 public:
     // ChessAI属性 —— 由棋局状态 、 评估结构体组成
-    Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
+    Chess *board;               //储存现有 棋局状态类(着法生成和状态显示类)
+    bool ownBoard;             //true: ChessAI自己new出来的棋盘;false: 外部拥有的棋盘，拷贝了另一个棋盘(保留原来的ChessAI ai，新增Chess ai(&chess)用法，区分棋盘是如何构造的)
+
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
     
     vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
@@ -382,9 +386,10 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
-    int ChessAI::quiescence_search(int alpha, int beta) ;                      //静态搜索，解决水平线效应
+    int quiescence_search(int alpha, int beta) ;                      //静态搜索，解决水平线效应
 
-    ChessAI();
+    ChessAI();                        //(隐式)实例化新对象
+    explicit ChessAI(Chess *board);   //(显式)实例化新对象
     ~ChessAI();
 };
 void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
@@ -392,6 +397,7 @@ void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
 
 int main()
 {
+    InitZobrist();
     Chess chess;
     getInputBotzone(chess);
     giveOutputBotzone(chess);
@@ -1497,27 +1503,31 @@ void ChessAI::getdiffmoves()
     }
 }
 
-ChessAI::ChessAI()
-    : searchTime(900)
-{
-    this->board = new Chess();
-    this->evaluator.copyBoard(this->board);
+ChessAI::ChessAI(): board(new Chess()),ownBoard(true),searchTime(900){
+    evaluator.copyBoard(board);
 
-    //初始化其它成员变量
+    evaluator.isKingattacked = false;
+
+}
+
+ChessAI::ChessAI(Chess* otherboard) : board(otherboard),ownBoard(false),searchTime(900){
+    if(board == nullptr){
+        throw std::runtime_error("Chess external obj is nullptr");
+    }
+
+    evaluator.copyBoard(board);
+
     evaluator.isKingattacked = false;
 }
 
-ChessAI::~ChessAI()
-{
-    //有指针变量，必须指定析构函数
-    if (board != nullptr)
-    {
+ChessAI::~ChessAI(){
+    //只有自己new出来的棋盘才delete
+    //外部传入的Chess chess是main/giveOutputZone管理的，不能由ChessAI删除
+    if(ownBoard && board != nullptr){
         delete board;
-        board = nullptr;
     }
+    board = nullptr;
 }
-
-
 //中局有进攻机会的兵 / 帅
 static const int mid_KingPawn_attack[90] = {
     10, 10, 10, 15, 15, 15, 10, 10, 10,
