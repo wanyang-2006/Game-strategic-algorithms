@@ -13,6 +13,7 @@
 #include <utility>
 #include <cstdint>
 #include <random>
+#include"TuningParams.h"
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -375,9 +376,14 @@ public:
     void alpha_beta_select(vector<MoveNode>& selected);                       //无参alpha_beta 基本alpha_beta搜索入口(初始化和边界条件)
     int alpha_beta_search(int depth,int alpha,int beta);                      //基本alpha_beta搜素函数
     void alpha_beta_PVS_select(vector<MoveNode>& selected);                   //alpha_beta_PMV 搜索入口
-    int alpha_beta_PVS_search(int depth,int alpha,int beta);                      //alpha_beta_PMV 搜索函数
+    int alpha_beta_PVS_search(int depth,int alpha,int beta);                  //alpha_beta_PMV 搜索函数
+    bool haveattack(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在“攻击”
     bool havethreat(vector<Grid>& tmpstate,colorType color);                  //我方棋子是否还存在"威胁"
     bool havethreat_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
+    bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
+    bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
+
+    int ChessAI::quiescence_search(int alpha, int beta) ;                      //静态搜索，解决水平线效应
 
     ChessAI();
     ~ChessAI();
@@ -1913,12 +1919,10 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
         throw(std::runtime_error("(calstaticstate)board is null"));
     }
     bool ismiddle = ismiddlecompostion(vec);
-    //判断color:红色和黑色的静态表对称
-
+    colorType oppCol = (color == RED) ? BLACK : RED;
     int res = 0;
 
     //红方 中局
-    //(x,y) -> (9*(9 - y) + x + 1 = 82 - 9 * y + x)
     if(color == RED && ismiddle){
         for(int y = 9;y >= 0;y --){
             for(int x = 0;x <= 8;x ++){
@@ -1931,21 +1935,24 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
                 case Pawn:
                 case King:{
                     bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? mid_KingPawn_attack[82 - 9 * y + x] : mid_KingPawn_no_attack[82 - 9 * y  + x];
+                    res += (flag) ? mid_KingPawn_attack[81 - 9 * y + x] : mid_KingPawn_no_attack[81 - 9 * y  + x];
                     break;
                 }
                 case Assistant:
                 case Bishop:{
-                    bool flag = this->isattacked(RED,x,y);
-                    res += (flag) ? mid_AdvBis_Threat[82 - 9 * y + x] : mid_AdvBis_no_Threat[82 - 9 * y + x];
+                    bool flag = this->isattacked(oppCol, x, y);
+                    res += (flag) ? mid_AdvBis_Threat[81 - 9 * y + x] : mid_AdvBis_no_Threat[81 - 9 * y + x];
                     break;
                 }
                 case Knight:
-                    res += mid_horse[82 - 9 * y + x];
+                    res += mid_horse[81 - 9 * y + x];
+                    break;
                 case Rook:
-                    res += mid_Rook[82 - 9 * y + x];
+                    res += mid_Rook[81 - 9 * y + x];
+                    break;
                 case Cannon:
-                    res += mid_Cannon[82 - 9 * y + x];
+                    res += mid_Cannon[81 - 9 * y + x];
+                    break;
                 default:
                     break;
                 }
@@ -1963,29 +1970,33 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
                 case Pawn:
                 case King:{
                     bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? end_KingPawn_attack[82 - 9 * y + x] : end_KingPawn_no_attack[82 - 9 * y  + x];
+                    res += (flag) ? end_KingPawn_attack[81 - 9 * y + x] : end_KingPawn_no_attack[81 - 9 * y  + x];
                     break;
                 }
                 case Assistant:
                 case Bishop:{
-                    bool flag = this->isattacked(RED,x,y);
-                    res += (flag) ? mid_AdvBis_Threat[82 - 9 * y + x] : mid_AdvBis_no_Threat[82 - 9 * y + x];
+                    bool flag = this->isattacked(oppCol, x, y);
+                    res += (flag) ? mid_AdvBis_Threat[81 - 9 * y + x] : mid_AdvBis_no_Threat[81 - 9 * y + x];
                     break;
                 }
                 case Knight:
-                    res += end_horse[82 - 9 * y + x];
+                    res += end_horse[81 - 9 * y + x];
+                    break;
                 case Rook:
-                    res += end_Rook[82 - 9 * y + x];
+                    res += end_Rook[81 - 9 * y + x];
+                    break;
                 case Cannon:
-                    res += end_Cannon[82 - 9 * y + x];
+                    res += end_Cannon[81 - 9 * y + x];
+                    break;
                 default:
                     break;
                 }
             }
-        }if(color == BLACK && ismiddle){
+        }
+    }else if(color == BLACK && ismiddle){
         for(int y = 9;y >= 0;y --){
             for(int x = 0;x <= 8;x ++){
-                if(vec[board->xy2pos(x,y)].color != RED)continue;
+                if(vec[board->xy2pos(x,y)].color != BLACK)continue;
 
                 switch (vec[board->xy2pos(x,y)].type)
                 {
@@ -1994,30 +2005,33 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
                 case Pawn:
                 case King:{
                     bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? mid_KingPawn_attack[9 + 9 * y - x] : mid_KingPawn_no_attack[9 + 9 * y - x];
+                    res += (flag) ? mid_KingPawn_attack[9 * y + x] : mid_KingPawn_no_attack[9 * y + x];
                     break;
                 }
                 case Assistant:
                 case Bishop:{
-                    bool flag = this->isattacked(RED,x,y);
-                    res += (flag) ? mid_AdvBis_Threat[9 + 9 * y - x] : mid_AdvBis_no_Threat[9 + 9 * y - x];
+                    bool flag = this->isattacked(oppCol, x, y);
+                    res += (flag) ? mid_AdvBis_Threat[9 * y + x] : mid_AdvBis_no_Threat[9 * y + x];
                     break;
                 }
                 case Knight:
-                    res += mid_horse[9 + 9 * y - x];
+                    res += mid_horse[9 * y + x];
+                    break;
                 case Rook:
-                    res += mid_Rook[9 + 9 * y - x];
+                    res += mid_Rook[9 * y + x];
+                    break;
                 case Cannon:
-                    res += mid_Cannon[9 + 9 * y - x];
+                    res += mid_Cannon[9 * y + x];
+                    break;
                 default:
                     break;
-                    }
                 }
             }
-        }else{ //color == BLACK && !ismiddle
+        }
+    }else{ //color == BLACK && !ismiddle
         for(int y = 9;y >= 0;y --){
             for(int x = 0;x <= 8;x ++){
-                if(vec[board->xy2pos(x,y)].color != RED)continue;
+                if(vec[board->xy2pos(x,y)].color != BLACK)continue;
 
                 switch (vec[board->xy2pos(x,y)].type)
                 {
@@ -2026,24 +2040,26 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
                 case Pawn:
                 case King:{
                     bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? end_KingPawn_attack[9 + 9 * y - x] : end_KingPawn_no_attack[9 + 9 * y - x];
+                    res += (flag) ? end_KingPawn_attack[9 * y + x] : end_KingPawn_no_attack[9 * y + x];
                     break;
                 }
                 case Assistant:
                 case Bishop:{
-                    bool flag = this->isattacked(RED,x,y);
-                    res += (flag) ? mid_AdvBis_no_Threat[9 + 9 * y - x] : mid_AdvBis_no_Threat[9 + 9 * y - x];
+                    bool flag = this->isattacked(oppCol, x, y);
+                    res += (flag) ? mid_AdvBis_Threat[9 * y + x] : mid_AdvBis_no_Threat[9 * y + x];
                     break;
                 }
                 case Knight:
-                    res += end_horse[9 + 9 * y - x];
+                    res += end_horse[9 * y + x];
+                    break;
                 case Rook:
-                    res += end_Rook[9 + 9 * y - x];
+                    res += end_Rook[9 * y + x];
+                    break;
                 case Cannon:
-                    res += end_Cannon[9 + 9 * y - x];
+                    res += end_Cannon[9 * y + x];
+                    break;
                 default:
                     break;
-                    }
                 }
             }
         }
@@ -2131,6 +2147,18 @@ int EvalRecord::calstate(vector<Grid>& target,colorType color){
     return res;
 }
 
+// 替换原有的复杂 delta 计算
+int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
+    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
+    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
+
+    auto target_piece = curstate[target_pos].type;
+    auto source_piece = curstate[source_pos].type;
+
+    return Tuning::getMVVLVAScore(source_piece, target_piece);
+}
+
+/*
 //评估单步着法的估值，可能不只是预估我方的某个着法
 int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //求delta值，现在的评分 —— 先前的评分
@@ -2162,7 +2190,7 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //自身增量减去对方增量
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
-
+*/
 /*
 int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color){
     int score = 0;
@@ -2251,9 +2279,9 @@ void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
 void ChessAI::MoveNodeVoid(){
     Move tmpmove;
     //让棋局在此步原地踏步
+    tmpmove.source_x = 1;
+    tmpmove.source_y = 1;
     tmpmove.target_x = 1;
-    tmpmove.target_x = 1;
-    tmpmove.target_y = 1;
     tmpmove.target_y = 1;
     board->makeMoveAssumeLegal(tmpmove);
 }
@@ -2392,7 +2420,8 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 
     if (depth == 0) { 
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
-        return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+        //return evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+        return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
     if(getWin()){
@@ -2430,10 +2459,10 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
             val = -alpha_beta_search(depth - 1,-beta,-alpha);
         }
         
-        if(val >= beta && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //beta剪枝
+        if(val >= beta){ //beta剪枝
             return beta;
         }
-        if(val > alpha && !havethreat_of_valuestone(this->board->state[board->currTurnId],board->currColor)){ //alpha剪枝
+        if(val > alpha){ //alpha更新
             alpha = val;
         }
     }
@@ -2456,8 +2485,9 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     }
 
     bool foundPV = false;
-    if(depth <= 0){
-        return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+    if(depth == 0){
+        //return evaluator.calstate(board->state[board->currTurnId],board->currColor);
+        return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
     if(getWin()){
@@ -2501,29 +2531,48 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         }
     }
 
+    //=====HashTable搜素完成=====\\
+
     //记录TT 表中，所得到的最优节点
     int original_alpha = alpha;
     Move best_move; //当前节点探索出的最佳着法
     int val;
 
+    //LMR改进 ———— 执行探测 val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha); 
+    //零窗口探测之前，先判断是否跳过部分深度。如果判定成功，才进行下一步的补充搜素，从而在残局和中局减少分支节点
+    //这一步必须是“白手” ———— 这一步着棋没有吃子和将军
+    int moveIndex = 0; //LMR ———— 当前是第几个着法
+
     for(auto& node : tmpMoveNodes){
         {
             MoveGuard guard(this, node);
-            
-            int extension = 0;
-            // 如果走完这步，重点棋子受威胁，强行多看一步
-            if(havethreat_of_valuestone(board->state[board->currTurnId], board->currColor)){
-                extension = 1; 
-            }
 
+            bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
 
             if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
-                val = -alpha_beta_PVS_search(depth - 1+extension,-alpha - 1,- alpha);
+
+                // =====LMR逻辑===== \\
+                
+                if(depth >= 3 && moveIndex && isQuiet){
+                    int R = 1; //裁剪因子，减去深度R
+                    //先进行0窗口试探，如果返回值大于alpha,说明它有潜力越界，这对于QuietMove是反常的！必须重新搜素！
+                    val = -alpha_beta_PVS_search(depth - 1 - R, -alpha - 1,-alpha);
+
+                    if(val > alpha){
+                        val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                    }
+                }else{
+                    //否则，使用常规的PVS零窗口搜素
+                    val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                }
+                // =====LMR逻辑结束===== \\
+
+                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
                 if((val > alpha) && (val < beta)){ //本区间内检查失败！
-                    val = -alpha_beta_PVS_search(depth - 1+extension,-beta,-alpha);
+                    val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
                 }
             }else{
-                val = -alpha_beta_PVS_search(depth - 1+extension,-beta,-alpha);
+                val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
             }
         }
 
@@ -2536,7 +2585,14 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             RecordHash(curkey,depth,beta,BETA,node.strategy);
             return beta;
         }
-        if(val > alpha){ //alpha剪枝
+/*
+        if(val > alpha && !havethreat_of_valuestone(this->board->state...,board->currColor)){ //alpha剪枝
+        alpha = val;
+        ...
+        一旦不更新 alpha，此路径的局部极大值就会被永久掩埋（丢掉最佳招法），并且返回错误的非极值打破了极大极小原理（Minimax），导致后续节点评估完全紊乱。
+*/
+
+        if(val > alpha){ //alpha更新
             alpha = val;
             foundPV = true;
         }
@@ -2575,6 +2631,94 @@ bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
     return false;
 }
 
+bool ChessAI::haveattack(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            if(tmp[board->xy2pos(x,y)].color == this->board->oppColor() && evaluator.isattacked(board->currColor,x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+bool ChessAI::haveattack_of_valuestone(vector<Grid>& tmp,colorType color){
+    for(int y = 9; y >= 0; y --){
+        for(int x = 0;x <= 8;x ++){
+            auto tmptype = tmp[board->xy2pos(x,y)].type;
+            bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
+            if(tmp[board->xy2pos(x,y)].color == board->oppColor() && is_important && evaluator.isattacked(board->currColor,x,y)){
+                return true; //说明存在威胁
+            }
+        }
+    }
+
+    return false;
+}
+
+//是否为“白手”
+
+bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
+    MoveNodeFront(tmpmove);
+    this->evaluator.getGridcontrol();
+    return havethreat(board->state[board->currTurnId],board->currColor);
+}
+
+int ChessAI::quiescence_search(int alpha, int beta) {
+    searchTime.check();
+    int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor); 
+    
+    if (stand >= beta) {
+        return beta;
+    }
+    if (stand > alpha) {
+        alpha = stand;
+    }
+
+    vector<Move> tmpMoves;
+    board->generateMovesWithForbidden(tmpMoves); 
+
+    vector<MoveNode> captureNodes;
+    auto& currState = board->state[board->currTurnId];
+    
+    for (const auto& m : tmpMoves) {
+        int targetPos = board->xy2pos(m.target_x, m.target_y);
+        int sourcePos = board->xy2pos(m.source_x, m.source_y);
+        
+        stoneType victim = currState[targetPos].type;
+        stoneType attacker = currState[sourcePos].type;
+
+        if (victim != None) // 仅筛选吃子着法
+        {
+            MoveNode node;
+            node.strategy = m;
+            // 调用封装好的 MVV/LVA 策略
+            node.value =Tuning::getMVVLVAScore(attacker, victim); 
+            captureNodes.push_back(node);
+        }
+    }
+
+    // 降序排序
+    this->MoveNodesort(captureNodes);
+
+    // 遍历吃子着法深入博弈树
+    for (auto& node : captureNodes) {
+        int val;
+        {
+            MoveGuard guard(this, node); // 走这步吃子棋
+            val = -quiescence_search(-beta, -alpha); 
+        }
+        if (val >= beta) {
+            return beta;
+        }
+        if (val > alpha) {
+            alpha = val;
+        }
+    }
+
+    return alpha;
+}
 
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
