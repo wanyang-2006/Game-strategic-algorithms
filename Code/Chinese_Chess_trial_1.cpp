@@ -404,30 +404,88 @@ int main()
     return 0;
 }
 
-// 向Botzone平台输出落子的函数定义
-void giveOutputBotzone(Chess &chess)
-{
-    vector<Move> retMoves;
-    chess.generateMovesWithForbidden(retMoves);
-    Json::Value ret;
+//将Move转换到Json的工具接口
+void writeMoveToJson(Json::Value& ret,Move& target){
+    ret["response"]["source"] = 
+        string(1,pgnint2char(target.source_x)) + string(1,int2char(target.source_y));
 
-    if (retMoves.empty())
-    {
-        ret["response"]["source"] = string("-1");
-        ret["response"]["target"] = string("-1");
+    ret["response"]["source"] =
+        string(1,pgnint2char(target.target_x)) + string(1,int2char(target.target_y));
+}
+
+// 向Botzone平台输出落子的函数定义
+// void giveOutputBotzone(Chess &chess)
+// {
+//     vector<Move> retMoves;
+//     chess.generateMovesWithForbidden(retMoves);
+//     Json::Value ret;
+
+//     if (retMoves.empty())
+//     {
+//         ret["response"]["source"] = string("-1");
+//         ret["response"]["target"] = string("-1");
+//     }
+//     else
+//     {
+//         srand(time(nullptr));
+//         int choice = rand() % retMoves.size();
+//         auto selMove = retMoves[choice];
+//         ret["response"]["source"] = string(1, pgnint2char(selMove.source_x)) + string(1, int2char(selMove.source_y));
+//         ret["response"]["target"] = string(1, pgnint2char(selMove.target_x)) + string(1, int2char(selMove.target_y));
+//     }
+//     Json::FastWriter writer;
+//     cout << writer.write(ret) << endl;
+// }
+
+void giveOutputBotzone(Chess& chess){
+    Json::Value ret;               
+    Move targetMove;               //被选中的走法
+    bool hasselectedmove = false;  //是否选择了走法？
+    
+    //使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
+    try{
+        ChessAI AI(&chess);
+
+        AI.alpha_beta_PVS_select(AI.select);
+        if(AI.select.empty() == false){
+            targetMove = AI.select[0].strategy;
+
+            //再确认是否合法？
+            if(chess.isMoveValidWithForbidden(targetMove)){
+                hasselectedmove = true;
+            }
+        }
+        
+    }catch(const std::exception&){
+        hasselectedmove = false;
     }
-    else
-    {
+
+    if(!hasselectedmove){
+        vector<Move> retMoves;
+        chess.generateMovesWithForbidden(retMoves);
+
+        //找不到合法棋步了，认输
+        if (retMoves.empty())
+        {
+            ret["response"]["source"] = string("-1");
+            ret["response"]["target"] = string("-1");
+
+            Json::FastWriter writer;
+            cout << writer.write(ret) << endl;
+            return;
+        }
+
+        //找到合法随机棋步
         srand(time(nullptr));
         int choice = rand() % retMoves.size();
-        auto selMove = retMoves[choice];
-        ret["response"]["source"] = string(1, pgnint2char(selMove.source_x)) + string(1, int2char(selMove.source_y));
-        ret["response"]["target"] = string(1, pgnint2char(selMove.target_x)) + string(1, int2char(selMove.target_y));
+        targetMove = retMoves[choice];        
     }
+
+    writeMoveToJson(ret,targetMove);
+
     Json::FastWriter writer;
     cout << writer.write(ret) << endl;
 }
-
 // 解析Botzone平台输入以更新棋局状态的函数定义
 void getInputBotzone(Chess &chess)
 {
@@ -1242,8 +1300,6 @@ void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend
     }
 }
 
-
-
 // 评估某步移动后是否会导致达到三次重复局面的函数定义
 bool Chess::repeatAfterMove(const Move &move)
 {
@@ -1326,6 +1382,18 @@ uint64_t Chess::getZobristKey(){
 }
 //在makeMoveAssumeLegal 和 undoMove中可以通过两次XOR抹去旧棋子，增加新棋子，不需要遍历全盘，可优化
 
+void Chess::generateMoveNodesWithForbidden(vector<MoveNode> &legalMoveNodes,bool mustDefend){
+    vector<Move> firstMoves;
+    generateMoves(firstMoves, mustDefend);
+    legalMoveNodes.clear();
+    for (const auto &move : firstMoves)
+    {
+        if (!repeatAfterMove(move))
+        {
+            legalMoveNodes.push_back({move,-1});
+        }
+    }
+}
 
 // 验证在禁手规则限制下某移动是否有效的函数定义
 bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
@@ -1484,8 +1552,18 @@ bool EvalRecord::isattacked(colorType color, int mx, int my)
 
 void ChessAI::generateMovesWithForbidden()
 {
-    board->generateMoveNodesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
     //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
+    curlegalmoves.clear();
+    eatenmoves.clear();
+    plainmoves.clear();
+
+    vector<Move> legalMoves;
+
+    //传true，表示生成不会让自己将帅被攻击的合法着法
+    board->generateMovesWithForbidden(legalMoves,true);
+    fill_sort_inMoveNodes(curlegalmoves,legalMoves);
+
+    getdiffmoves();
 }
 
 void ChessAI::getdiffmoves()
