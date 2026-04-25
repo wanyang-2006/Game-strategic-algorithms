@@ -2413,7 +2413,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     sort(selected.begin(),selected.end(),MoveNodecmp);
 }
 
-//alpha —— beta 具体搜索函数 将函数入口和函数体相玻璃
+//alpha —— beta 具体搜索函数 将函数入口和函数体相剥离
 
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     searchTime.check();
