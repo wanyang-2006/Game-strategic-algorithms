@@ -2621,7 +2621,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                     val = -alpha_beta_PVS_search(depth - 1 - R, -alpha - 1,-alpha);
 
                     if(val > alpha){
-                        val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                        val = -alpha_beta_PVS_search(depth - 1, -beta,-alpha);//需要全窗口搜索
                     }
                 }else{
                     //否则，使用常规的PVS零窗口搜素
@@ -2637,6 +2637,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                 val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
             }
         } //这里的括号用于限制MoveGuard作用域
+        moveIndex++;//尝试后moveIndex递增 
 
         if(val > alpha){
             best_move = node.strategy;
@@ -2744,19 +2745,39 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
 
 int ChessAI::quiescence_search(int alpha, int beta) {
     searchTime.check();
-    int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor); 
-    
-    if (stand >= beta) {
-        return beta;
+
+    int kingX = -1, kingY = -1;
+    for (int x = 3; x <= 5; x++) { 
+        for (int y = 0; y <= 9; y++) {
+            auto& grid = board->state[board->currTurnId][board->xy2pos(x, y)];
+            if (grid.color == board->currColor && grid.type == King) {
+                kingX = x; 
+                kingY = y;
+                break;
+            }
+        }
+        if (kingX != -1) break;
     }
-    if (stand > alpha) {
-        alpha = stand;
+    
+    bool inCheck = board->attacked(board->oppColor(), kingX, kingY);
+
+    if (!inCheck) {
+        int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);
+        if (stand >= beta) {
+            return beta;
+        }
+        if (stand > alpha) {
+            alpha = stand;
+        }
     }
 
     vector<Move> tmpMoves;
-    board->generateMovesWithForbidden(tmpMoves); 
+    board->generateMovesWithForbidden(tmpMoves);
+    if (inCheck && tmpMoves.empty()) {
+        return minstateval + 1000; 
+    }
 
-    vector<MoveNode> captureNodes;
+    vector<MoveNode> nextNodes;
     auto& currState = board->state[board->currTurnId];
     
     for (const auto& m : tmpMoves) {
@@ -2765,25 +2786,25 @@ int ChessAI::quiescence_search(int alpha, int beta) {
         
         stoneType victim = currState[targetPos].type;
         stoneType attacker = currState[sourcePos].type;
-
-        if (victim != None) // 仅筛选吃子着法
-        {
+        if (inCheck || victim != None) {
             MoveNode node;
             node.strategy = m;
-            // 调用封装好的 MVV/LVA 策略
-            node.value =Tuning::getMVVLVAScore(attacker, victim); 
-            captureNodes.push_back(node);
+            
+            if (victim != None) {
+                node.value = Tuning::getMVVLVAScore(attacker, victim) + 100000; 
+            } else {
+                node.value = 0; 
+            }
+            nextNodes.push_back(node);
         }
     }
 
     // 降序排序
-    this->MoveNodesort(captureNodes);
-
-    // 遍历吃子着法深入博弈树
-    for (auto& node : captureNodes) {
+    this->MoveNodesort(nextNodes);
+    for (auto& node : nextNodes) {
         int val;
         {
-            MoveGuard guard(this, node); // 走这步吃子棋
+            MoveGuard guard(this, node);
             val = -quiescence_search(-beta, -alpha); 
         }
         if (val >= beta) {
