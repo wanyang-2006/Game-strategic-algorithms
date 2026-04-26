@@ -13,6 +13,7 @@
 #include <utility>
 #include <cstdint>
 #include <random>
+#include"TuningParams.h"
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -388,7 +389,7 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
-    int quiescence_search(int alpha, int beta) ;                      //静态搜索，解决水平线效应
+    int ChessAI::quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
 
     ChessAI();                        //(隐式)实例化新对象
     explicit ChessAI(Chess *board);   //(显式)实例化新对象
@@ -397,7 +398,6 @@ public:
 void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
 void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
 
-#ifndef GENERATE_OPENING_BOOK
 int main()
 {
     InitZobrist();
@@ -406,7 +406,6 @@ int main()
     giveOutputBotzone(chess);
     return 0;
 }
-#endif
 
 //将Move转换到Json的工具接口
 void writeMoveToJson(Json::Value& ret,Move& target){
@@ -2238,6 +2237,17 @@ int EvalRecord::calstate(vector<Grid>& target,colorType color){
     return res;
 }
 
+int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
+    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
+    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
+
+    auto target_piece = curstate[target_pos].type;
+    auto source_piece = curstate[source_pos].type;
+
+    return Tuning::getMVVLVAScore(source_piece, target_piece);
+}
+
+/*
 //评估单步着法的估值，可能不只是预估我方的某个着法
 int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //求delta值，现在的评分 —— 先前的评分
@@ -2269,64 +2279,7 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     //自身增量减去对方增量
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
-
-/*
-int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color){
-    int score = 0;
-    
-    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
-    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
-
-    auto target_piece = curstate[target_pos].type;
-    auto source_piece = curstate[source_pos].type;
-
-    // 如果目标位置有敌方棋子（发生吃子）
-    if (target_piece != None) {
-        int target_val = 0;
-        int source_val = 0;
-
-        // 获取受害者价值 (MVV)
-        switch(target_piece) {
-            case King: target_val = 10000; break;
-            case Rook: target_val = 900; break;
-            case Cannon: target_val = 450; break;
-            case Knight: target_val = 400; break;
-            case Bishop: target_val = 200; break;
-            case Assistant: target_val = 200; break;
-            case Pawn: target_val = 100; break;
-            default: break;
-        }
-
-        // 获取攻击者价值 (LVA)
-        switch(source_piece) {
-            case King: source_val = 10000; break;
-            case Rook: source_val = 900; break;
-            case Cannon: source_val = 450; break;
-            case Knight: source_val = 400; break;
-            case Bishop: source_val = 200; break;
-            case Assistant: source_val = 200; break;
-            case Pawn: source_val = 100; break;
-            default: break;
-        }
-
-        // 确保排在不吃子的走法前面。
-        // target_val*10 确保受害者的价值占据绝对主导。
-        score = 10000 + target_val*10 - source_val;
-    }
-    
-    // 如果没有吃子，返回 0
-    return score;
-}
 */
-//现有策略随着递归深度加深会导致速度严重下降
-//上面一个极简的MVV/LVA评估函数，时间复杂度O(1)确保吃子走法优先于不吃子走法，并在吃子走法中优先考虑高价值受害者和低价值攻击者的组合，分数生成应该采用更合适等等策略。
-//方案1：浅层保持全面评估，深层使用MVV/LVA评估以节省时间
-//方案2：将棋子价值进行排序，优先搜索高价值受害者的吃子走法，让关键子的棋布被优先搜索，避免时间浪费在低价值棋子上，在深度到达一定程度时可以考虑完全舍弃非关键棋子的搜索
-//方案3：在搜索中如果发现敌我双方分数差异过大，可以考虑提前剪枝，舍弃那些明显不利的走法
-//注意！第二种方案在评估阶段就进行可能导致被将军时严重忽略士相的保护步法，为防止该情况建议分支在排序中沉底而不是过早剪枝
-//注意！第三种方案需要谨慎使用，过早剪枝可能导致错过关键的防守或反击机会，建议设置一个合理的阈值，并结合其他评估指标进行判断，以避免过度剪枝导致的误判。
-//不建议三种方案同时启用，会使搜索异常复杂，建议使用单一或一种主导第二种辅助的方案
-
 
 //填充MoveNode，并排序
 void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
@@ -2448,7 +2401,7 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 }
 
 void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
-
+    int max_depth = 10;
     int alpha = minstateval;
     int beta = maxstateval;
     
@@ -2668,7 +2621,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                     val = -alpha_beta_PVS_search(depth - 1 - R, -alpha - 1,-alpha);
 
                     if(val > alpha){
-                        val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                        val = -alpha_beta_PVS_search(depth - 1, -beta,-alpha);//需要全窗口搜索
                     }
                 }else{
                     //否则，使用常规的PVS零窗口搜素
@@ -2684,6 +2637,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                 val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
             }
         } //这里的括号用于限制MoveGuard作用域
+        moveIndex++;//尝试后moveIndex递增 
 
         if(val > alpha){
             best_move = node.strategy;
@@ -2782,6 +2736,7 @@ bool ChessAI::haveattack_of_valuestone(vector<Grid>& tmp,colorType color){
 }
 
 //是否为“白手”
+
 bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
     MoveNodeFront(tmpmove);
     this->evaluator.getGridcontrol();
@@ -2790,58 +2745,66 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
 
 int ChessAI::quiescence_search(int alpha, int beta) {
     searchTime.check();
-    int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);// 获取局面保底分数
-    
-    if (stand >= beta) 
-    {
-        return beta;//更新beta
-    }
 
-    if (stand > alpha) 
-    {
-        alpha = stand;//更新alpha
+    int kingX = -1, kingY = -1;
+    for (int x = 3; x <= 5; x++) { 
+        for (int y = 0; y <= 9; y++) {
+            auto& grid = board->state[board->currTurnId][board->xy2pos(x, y)];
+            if (grid.color == board->currColor && grid.type == King) {
+                kingX = x; 
+                kingY = y;
+                break;
+            }
+        }
+        if (kingX != -1) break;
+    }
+    
+    bool inCheck = board->attacked(board->oppColor(), kingX, kingY);
+
+    if (!inCheck) {
+        int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);
+        if (stand >= beta) {
+            return beta;
+        }
+        if (stand > alpha) {
+            alpha = stand;
+        }
     }
 
     vector<Move> tmpMoves;
-    board->generateMovesWithForbidden(tmpMoves);//获取合法着法
+    board->generateMovesWithForbidden(tmpMoves);
+    if (inCheck && tmpMoves.empty()) {
+        return minstateval + 1000; 
+    }
 
-    vector<MoveNode> captureNodes;
+    vector<MoveNode> nextNodes;
     auto& currState = board->state[board->currTurnId];
     
     for (const auto& m : tmpMoves) {
         int targetPos = board->xy2pos(m.target_x, m.target_y);
+        int sourcePos = board->xy2pos(m.source_x, m.source_y);
+        
         stoneType victim = currState[targetPos].type;
-
-        if (victim != None) // 基于吃子着法
-        {
+        stoneType attacker = currState[sourcePos].type;
+        if (inCheck || victim != None) {
             MoveNode node;
             node.strategy = m;
             
-            // 一个只基于被吃子价值的排序，建议在MVV/LVA 排序合并进项目且封装时换用MVV/LVA
-            int victim_val = 0;
-            switch (victim) {
-                case King:      victim_val = 10000; break;
-                case Rook:      victim_val = 900;   break;
-                case Cannon:    victim_val = 450;   break;
-                case Knight:    victim_val = 400;   break;
-                case Bishop:    victim_val = 200;   break;
-                case Assistant: victim_val = 200;   break;
-                case Pawn:      victim_val = 100;   break;
-                default:        victim_val = 0;     break;
+            if (victim != None) {
+                node.value = Tuning::getMVVLVAScore(attacker, victim) + 100000; 
+            } else {
+                node.value = 0; 
             }
-            node.value = victim_val; 
-            captureNodes.push_back(node);
+            nextNodes.push_back(node);
         }
     }
 
     // 降序排序
-    this->MoveNodesort(captureNodes);
-
-    // 遍历这些吃子着法，继续深入博弈树
-    for (auto& node : captureNodes) {
+    this->MoveNodesort(nextNodes);
+    for (auto& node : nextNodes) {
         int val;
         {
-            MoveGuard guard(this, node); // 着这步吃子棋
+            MoveGuard guard(this, node);
             val = -quiescence_search(-beta, -alpha); 
         }
         if (val >= beta) {
@@ -2853,7 +2816,7 @@ int ChessAI::quiescence_search(int alpha, int beta) {
     }
 
     return alpha;
-}//静态搜索实现暂时较为简单，预计把排序策略更换为MVV/LVA，未来可以加入置换表
+}
 
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会

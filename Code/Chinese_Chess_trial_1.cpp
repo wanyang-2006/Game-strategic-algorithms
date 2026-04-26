@@ -13,7 +13,9 @@
 #include <utility>
 #include <cstdint>
 #include <random>
-#include"TuningParams.h"
+#include "TuningParams.h"  //在botzone中的路径为 ./data/TuningParams.h 即为目标文件
+#include <fstream>
+#include <string>
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -23,6 +25,10 @@ using std::map;
 using std::string;
 using std::vector;
 using std::pair;
+using std::ifstream;   //文件流读写
+using std::ofstream;
+using std::string;
+using std::to_string;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度
@@ -92,7 +98,51 @@ void InitZobrist(){
     }
     ZobristPlayer = randomnum();
 }
+class Chess;
+class Move;
+bool getchessbook(Chess& chess,Move& bookMove){
+    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
+    if(!fin.is_open()){
+        return false;
+    }
 
+    Json::Value book;
+    Json::Reader reader;
+    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
+        return false;            //Json解析失败
+    }
+
+    uint64_t tmpkey = chess.getZobristKey();
+    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
+    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
+        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
+    }
+
+    Json::Value &moves = book[keyStr];
+    //选择count最大的走法
+    int bestIdx = 0;
+    int bestCount = moves[0].get("count",0).asInt();
+
+    for(int i = 1;i < moves.size();i ++){
+        int c = moves[i].get("count",0).asInt();
+        if(c > bestCount){
+            bestCount = c;
+            bestIdx = i;
+        }
+    }
+
+    const Json::Value &m = moves[bestIdx]["move"];
+
+    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
+
+    //必须再验证合法性
+    if(!chess.isMoveValidWithForbidden(res)){
+        return false;
+    }
+
+    bookMove = res;
+    return true;
+}
 // PGN字符横坐标转数值
 int pgnchar2int(char c)
 {
@@ -445,13 +495,19 @@ void giveOutputBotzone(Chess& chess){
     Move targetMove;               //被选中的走法
     bool hasselectedmove = false;  //是否选择了走法？
     
-    //使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
-    try{
-        ChessAI AI(&chess);
+    //1.优先使用开局库 
+    if(getchessbook(chess,targetMove)){
+        hasselectedmove = true;
+    }
 
-        AI.alpha_beta_PVS_select(AI.select);
-        if(AI.select.empty() == false){
-            targetMove = AI.select[0].strategy;
+    if(!hasselectedmove){
+    //2.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
+        try{
+            ChessAI AI(&chess);
+
+            AI.alpha_beta_PVS_select(AI.select);
+            if(AI.select.empty() == false){
+                targetMove = AI.select[0].strategy;
 
             //再确认是否合法？
             if(chess.isMoveValidWithForbidden(targetMove)){
@@ -459,10 +515,12 @@ void giveOutputBotzone(Chess& chess){
             }
         }
         
-    }catch(const std::exception&){
-        hasselectedmove = false;
+        }catch(const std::exception&){
+            hasselectedmove = false;
+        }
     }
 
+    //3.经过PVS算法计算之后没有得出合法步，则随机走步
     if(!hasselectedmove){
         vector<Move> retMoves;
         chess.generateMovesWithForbidden(retMoves);
@@ -2164,7 +2222,7 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
 //2.进攻度分析 —————— 对对方半场的控制度
 //3.防御度分析 —————— 对我方半场的控制度
 const int EnemyKingArea = 8;  //敌方九宫区域 ———— 最为重要，唯有控制敌方九宫才有夺取胜利的机会！
-const int EnemyHalf = 5; 
+const int EnemyHalf = 5;       
 const int OwnHalf = 2;        //我方半场
 const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
 const int attackweight = 1;       //或使用double，进攻权重
