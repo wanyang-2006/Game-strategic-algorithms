@@ -119,19 +119,34 @@ bool getchessbook(Chess& chess,Move& bookMove){
     }
 
     Json::Value &moves = book[keyStr];
-    //选择count最大的走法
-    int bestIdx = 0;
-    int bestCount = moves[0].get("count",0).asInt();
+    // //选择count最大的走法
+    // int bestIdx = 0;
+    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
 
+    // for(int i = 1;i < moves.size();i ++){
+    //     int c = moves[i].get("count",0).asInt();
+    //     if(c > bestCount){
+    //         bestCount = c;
+    //         bestIdx = i;
+    //     }
+    // }
+
+    //在出现频次最高的 Move中随机挑选
+    int selectIdx = 0;
+    vector<int> selectIdxes;           //待选择的多个Move的索引
+    selectIdxes.push_back(selectIdx);  //先加入第一个
     for(int i = 1;i < moves.size();i ++){
         int c = moves[i].get("count",0).asInt();
-        if(c > bestCount){
-            bestCount = c;
-            bestIdx = i;
+        if(c > selectIdxes[0]){        
+            selectIdxes.clear();
         }
+        selectIdxes.push_back(i);
     }
 
-    const Json::Value &m = moves[bestIdx]["move"];
+    srand(time(0));
+    selectIdx = selectIdxes[rand() % selectIdxes.size()];
+
+    const Json::Value &m = moves[selectIdx]["move"];
 
     Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
 
