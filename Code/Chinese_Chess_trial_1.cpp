@@ -2242,6 +2242,8 @@ const int OwnHalf = 2;        //我方半场
 const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
 const int attackweight = 1;       //或使用double，进攻权重
 const int defenceweight = 1;      //或使用double，防御权重
+
+//没有实现双方真正对比
 int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
     //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
     int myattack = 0,myDefense = 0; 
@@ -2254,21 +2256,21 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
             auto& tmpgrid = target[board->xy2pos(x,y)];
             int pos = board->xy2pos(x,y);
 
-            if(idx == 0){
+            if(idx == 0){//红方打分
                 if(y <= 4){ //红方半场
                     if(board->inKingArea(x,y,RED)){
                         myDefense += GridControl[idx][pos] * OwnKingArea;
                     }else{
                         myDefense += GridControl[idx][pos] * OwnHalf;
                     }
-                }else{
-                    if(board->inKingArea(x,y,RED)){
+                }else{ //y >= 5
+                    if(board->inKingArea(x,y,BLACK)){
                         myattack += GridControl[idx][pos] * EnemyKingArea;
                     }else{
                         myattack += GridControl[idx][pos] * EnemyHalf;
                     }
                 }
-            }else{
+            }else{//黑方打分
                 if(y >= 5){ //黑方半场
                     if(board->inKingArea(x,y,BLACK)){
                         myDefense += GridControl[idx][pos] * OwnKingArea;
@@ -2276,7 +2278,7 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
                         myDefense += GridControl[idx][pos] * OwnHalf;
                     }
                 }else{
-                    if(board->inKingArea(x,y,BLACK)){
+                    if(board->inKingArea(x,y,RED)){
                         myattack += GridControl[idx][pos] * EnemyKingArea;
                     }else{
                         myattack += GridControl[idx][pos] * EnemyHalf;
@@ -2285,7 +2287,44 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
             }
         }
     }
-    
+
+
+    for(int y = 9;y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            auto& tmpgrid = target[board->xy2pos(x,y)];
+            int pos = board->xy2pos(x,y);
+
+            if(idx == 0){//红方给黑方（对手打分）
+                if(y <= 4){ //红方半场
+                    if(board->inKingArea(x,y,RED)){
+                        oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppattack += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }else{ //y >= 5
+                    if(board->inKingArea(x,y,BLACK)){
+                        oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }
+            }else{//黑方打分
+                if(y >= 5){ //黑方半场
+                    if(board->inKingArea(x,y,BLACK)){
+                        oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppattack += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }else{
+                    if(board->inKingArea(x,y,BLACK)){
+                        oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }
+            }
+        }
+    }
     //进攻度分析 ———— Gridcontrol 我方在对方半场的控制点、对方在对方半场的控制点
 
     //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
