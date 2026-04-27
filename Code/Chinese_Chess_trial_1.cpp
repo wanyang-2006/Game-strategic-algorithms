@@ -5,7 +5,6 @@
 #include <map>
 #include <cassert>
 #include <algorithm>
-#include <vector>
 #include <stdexcept>
 #include <time.h>
 #include "jsoncpp/json.h"
@@ -15,7 +14,6 @@
 #include <random>
 #include "TuningParams.h"  //在botzone中的路径为 ./data/TuningParams.h 即为目标文件
 #include <fstream>
-#include <string>
 
 using std::uint64_t;   //64位hash
 using std::cin;

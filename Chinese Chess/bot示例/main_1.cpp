@@ -1,6 +1,5 @@
 #include <iostream>
 #include <string>
-#include <vector>
 #include <cmath>
 #include <map>
 #include <cassert>
@@ -13,7 +12,8 @@
 #include <utility>
 #include <cstdint>
 #include <random>
-#include"TuningParams.h"
+#include "TuningParams.h"  //在botzone中的路径为 ./data/TuningParams.h 即为目标文件
+#include <fstream>
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -23,6 +23,10 @@ using std::map;
 using std::string;
 using std::vector;
 using std::pair;
+using std::ifstream;   //文件流读写
+using std::ofstream;
+using std::string;
+using std::to_string;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度
@@ -78,8 +82,10 @@ int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”�
 
 //类似于算法题目中的记忆化搜索 ———— 将先前搜索得到的节点存入置换表
 //初始化Zobrist随机数表和Zobrist 轮次标识
+
+//构建开局库
 void InitZobrist(){
-    std::mt19937_64 randomnum(time(0));
+    std::mt19937_64 randomnum(20262026ULL);
 
     for(int type = 0;type < 8;type ++){
         for(int color = 0;color < 2;color ++){
@@ -90,7 +96,66 @@ void InitZobrist(){
     }
     ZobristPlayer = randomnum();
 }
+class Chess;
+class Move;
+bool getchessbook(Chess& chess,Move& bookMove){
+    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
+    if(!fin.is_open()){
+        return false;
+    }
 
+    Json::Value book;
+    Json::Reader reader;
+    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
+        return false;            //Json解析失败
+    }
+
+    uint64_t tmpkey = chess.getZobristKey();
+    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
+    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
+        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
+    }
+
+    Json::Value &moves = book[keyStr];
+    // //选择count最大的走法
+    // int bestIdx = 0;
+    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
+
+    // for(int i = 1;i < moves.size();i ++){
+    //     int c = moves[i].get("count",0).asInt();
+    //     if(c > bestCount){
+    //         bestCount = c;
+    //         bestIdx = i;
+    //     }
+    // }
+
+    //在出现频次最高的 Move中随机挑选
+    int selectIdx = 0;
+    vector<int> selectIdxes;           //待选择的多个Move的索引
+    selectIdxes.push_back(selectIdx);  //先加入第一个
+    for(int i = 1;i < moves.size();i ++){
+        int c = moves[i].get("count",0).asInt();
+        if(c > selectIdxes[0]){        
+            selectIdxes.clear();
+        }
+        selectIdxes.push_back(i);
+    }
+
+    srand(time(0));
+    selectIdx = selectIdxes[rand() % selectIdxes.size()];
+
+    const Json::Value &m = moves[selectIdx]["move"];
+
+    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
+
+    //必须再验证合法性
+    if(!chess.isMoveValidWithForbidden(res)){
+        return false;
+    }
+
+    bookMove = res;
+    return true;
+}
 // PGN字符横坐标转数值
 int pgnchar2int(char c)
 {
@@ -344,12 +409,15 @@ public:
     EvalRecord() : board(nullptr), isKingattacked(false) {}
 };
 
+const int max_depth = 64;       //最大搜素深度
 //产生策略类
 class ChessAI
 {
 public:
     // ChessAI属性 —— 由棋局状态 、 评估结构体组成
-    Chess *board; //储存现有 棋局状态类(着法生成和状态显示类)
+    Chess *board;               //储存现有 棋局状态类(着法生成和状态显示类)
+    bool ownBoard;             //true: ChessAI自己new出来的棋盘;false: 外部拥有的棋盘，拷贝了另一个棋盘(保留原来的ChessAI ai，新增Chess ai(&chess)用法，区分棋盘是如何构造的)
+
     EvalRecord evaluator;       // 独立负责局面打分的评估器,能够返回各个结果
     
     vector<MoveNode> curlegalmoves; //由chess产生，当前合法的状态
@@ -358,7 +426,8 @@ public:
     vector<MoveNode> select;      //经过处理后的Move方法
     SearchTime searchTime;          // 搜索计时器
 
-    // ChessAI方法
+    Move killerMoves[max_depth][2];                            //杀手着法表，假设最大搜素深度为Max_Search_Depth 每层杀手着法数目设为2
+    // ChessAI方法                                      
     bool getWin();                                                            //更新isWin,判断是否胜利
     void getcurstones(void);
     void generateMovesWithForbidden();                                        //对应board的同名方法
@@ -383,9 +452,10 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
-    int ChessAI::quiescence_search(int alpha, int beta) ;                      //静态搜索，解决水平线效应
+    int ChessAI::quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
 
-    ChessAI();
+    ChessAI();                        //(隐式)实例化新对象
+    explicit ChessAI(Chess *board);   //(显式)实例化新对象
     ~ChessAI();
 };
 void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
@@ -393,36 +463,103 @@ void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
 
 int main()
 {
+    InitZobrist();
     Chess chess;
     getInputBotzone(chess);
     giveOutputBotzone(chess);
     return 0;
 }
 
-// 向Botzone平台输出落子的函数定义
-void giveOutputBotzone(Chess &chess)
-{
-    vector<Move> retMoves;
-    chess.generateMovesWithForbidden(retMoves);
-    Json::Value ret;
+//将Move转换到Json的工具接口
+void writeMoveToJson(Json::Value& ret,Move& target){
+    ret["response"]["source"] = 
+        string(1,pgnint2char(target.source_x)) + string(1,int2char(target.source_y));
 
-    if (retMoves.empty())
-    {
-        ret["response"]["source"] = string("-1");
-        ret["response"]["target"] = string("-1");
+    ret["response"]["target"] =
+        string(1,pgnint2char(target.target_x)) + string(1,int2char(target.target_y));
+}
+
+// 向Botzone平台输出落子的函数定义
+// void giveOutputBotzone(Chess &chess)
+// {
+//     vector<Move> retMoves;
+//     chess.generateMovesWithForbidden(retMoves);
+//     Json::Value ret;
+
+//     if (retMoves.empty())
+//     {
+//         ret["response"]["source"] = string("-1");
+//         ret["response"]["target"] = string("-1");
+//     }
+//     else
+//     {
+//         srand(time(nullptr));
+//         int choice = rand() % retMoves.size();
+//         auto selMove = retMoves[choice];
+//         ret["response"]["source"] = string(1, pgnint2char(selMove.source_x)) + string(1, int2char(selMove.source_y));
+//         ret["response"]["target"] = string(1, pgnint2char(selMove.target_x)) + string(1, int2char(selMove.target_y));
+//     }
+//     Json::FastWriter writer;
+//     cout << writer.write(ret) << endl;
+// }
+
+void giveOutputBotzone(Chess& chess){
+    Json::Value ret;               
+    Move targetMove;               //被选中的走法
+    bool hasselectedmove = false;  //是否选择了走法？
+    
+    //1.优先使用开局库 
+    if(getchessbook(chess,targetMove)){
+        hasselectedmove = true;
     }
-    else
-    {
+
+    if(!hasselectedmove){
+    //2.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
+        try{
+            ChessAI AI(&chess);
+
+            AI.alpha_beta_PVS_select(AI.select);
+            if(AI.select.empty() == false){
+                targetMove = AI.select[0].strategy;
+
+            //再确认是否合法？
+            if(chess.isMoveValidWithForbidden(targetMove)){
+                hasselectedmove = true;
+            }
+        }
+        
+        }catch(const std::exception&){
+            hasselectedmove = false;
+        }
+    }
+
+    //3.经过PVS算法计算之后没有得出合法步，则随机走步
+    if(!hasselectedmove){
+        vector<Move> retMoves;
+        chess.generateMovesWithForbidden(retMoves);
+
+        //找不到合法棋步了，认输
+        if (retMoves.empty())
+        {
+            ret["response"]["source"] = string("-1");
+            ret["response"]["target"] = string("-1");
+
+            Json::FastWriter writer;
+            cout << writer.write(ret) << endl;
+            return;
+        }
+
+        //找到合法随机棋步
         srand(time(nullptr));
         int choice = rand() % retMoves.size();
-        auto selMove = retMoves[choice];
-        ret["response"]["source"] = string(1, pgnint2char(selMove.source_x)) + string(1, int2char(selMove.source_y));
-        ret["response"]["target"] = string(1, pgnint2char(selMove.target_x)) + string(1, int2char(selMove.target_y));
+        targetMove = retMoves[choice];        
     }
+
+    writeMoveToJson(ret,targetMove);
+
     Json::FastWriter writer;
     cout << writer.write(ret) << endl;
 }
-
 // 解析Botzone平台输入以更新棋局状态的函数定义
 void getInputBotzone(Chess &chess)
 {
@@ -1237,8 +1374,6 @@ void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend
     }
 }
 
-
-
 // 评估某步移动后是否会导致达到三次重复局面的函数定义
 bool Chess::repeatAfterMove(const Move &move)
 {
@@ -1321,6 +1456,18 @@ uint64_t Chess::getZobristKey(){
 }
 //在makeMoveAssumeLegal 和 undoMove中可以通过两次XOR抹去旧棋子，增加新棋子，不需要遍历全盘，可优化
 
+void Chess::generateMoveNodesWithForbidden(vector<MoveNode> &legalMoveNodes,bool mustDefend){
+    vector<Move> firstMoves;
+    generateMoves(firstMoves, mustDefend);
+    legalMoveNodes.clear();
+    for (const auto &move : firstMoves)
+    {
+        if (!repeatAfterMove(move))
+        {
+            legalMoveNodes.push_back({move,-1});
+        }
+    }
+}
 
 // 验证在禁手规则限制下某移动是否有效的函数定义
 bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
@@ -1479,8 +1626,18 @@ bool EvalRecord::isattacked(colorType color, int mx, int my)
 
 void ChessAI::generateMovesWithForbidden()
 {
-    board->generateMoveNodesWithForbidden(this->curlegalmoves, evaluator.isKingattacked);
     //仿照lastMoveEaten，还要防止长将手、长捉手，已经生成所有满足条件的着法
+    curlegalmoves.clear();
+    eatenmoves.clear();
+    plainmoves.clear();
+
+    vector<Move> legalMoves;
+
+    //传true，表示生成不会让自己将帅被攻击的合法着法
+    board->generateMovesWithForbidden(legalMoves,true);
+    fill_sort_inMoveNodes(curlegalmoves,legalMoves);
+
+    getdiffmoves();
 }
 
 void ChessAI::getdiffmoves()
@@ -1498,27 +1655,31 @@ void ChessAI::getdiffmoves()
     }
 }
 
-ChessAI::ChessAI()
-    : searchTime(900)
-{
-    this->board = new Chess();
-    this->evaluator.copyBoard(this->board);
+ChessAI::ChessAI(): board(new Chess()),ownBoard(true),searchTime(900){
+    evaluator.copyBoard(board);
 
-    //初始化其它成员变量
+    evaluator.isKingattacked = false;
+
+}
+
+ChessAI::ChessAI(Chess* otherboard) : board(otherboard),ownBoard(false),searchTime(900){
+    if(board == nullptr){
+        throw std::runtime_error("Chess external obj is nullptr");
+    }
+
+    evaluator.copyBoard(board);
+
     evaluator.isKingattacked = false;
 }
 
-ChessAI::~ChessAI()
-{
-    //有指针变量，必须指定析构函数
-    if (board != nullptr)
-    {
+ChessAI::~ChessAI(){
+    //只有自己new出来的棋盘才delete
+    //外部传入的Chess chess是main/giveOutputZone管理的，不能由ChessAI删除
+    if(ownBoard && board != nullptr){
         delete board;
-        board = nullptr;
     }
+    board = nullptr;
 }
-
-
 //中局有进攻机会的兵 / 帅
 static const int mid_KingPawn_attack[90] = {
     10, 10, 10, 15, 15, 15, 10, 10, 10,
@@ -2074,7 +2235,7 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
 //2.进攻度分析 —————— 对对方半场的控制度
 //3.防御度分析 —————— 对我方半场的控制度
 const int EnemyKingArea = 8;  //敌方九宫区域 ———— 最为重要，唯有控制敌方九宫才有夺取胜利的机会！
-const int EnemyHalf = 5; 
+const int EnemyHalf = 5;       
 const int OwnHalf = 2;        //我方半场
 const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
 const int attackweight = 1;       //或使用double，进攻权重
@@ -2147,7 +2308,6 @@ int EvalRecord::calstate(vector<Grid>& target,colorType color){
     return res;
 }
 
-// 替换原有的复杂 delta 计算
 int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
     int target_pos = board->xy2pos(cur.target_x, cur.target_y);
     int source_pos = board->xy2pos(cur.source_x, cur.source_y);
@@ -2191,63 +2351,6 @@ int EvalRecord::calcurmove(Move& cur,vector<Grid>& curstate,colorType color){
     return (mycurval - mypreval) - (oppcurval - opppreval);
 }
 */
-/*
-int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color){
-    int score = 0;
-    
-    int target_pos = board->xy2pos(cur.target_x, cur.target_y);
-    int source_pos = board->xy2pos(cur.source_x, cur.source_y);
-
-    auto target_piece = curstate[target_pos].type;
-    auto source_piece = curstate[source_pos].type;
-
-    // 如果目标位置有敌方棋子（发生吃子）
-    if (target_piece != None) {
-        int target_val = 0;
-        int source_val = 0;
-
-        // 获取受害者价值 (MVV)
-        switch(target_piece) {
-            case King: target_val = 10000; break;
-            case Rook: target_val = 900; break;
-            case Cannon: target_val = 450; break;
-            case Knight: target_val = 400; break;
-            case Bishop: target_val = 200; break;
-            case Assistant: target_val = 200; break;
-            case Pawn: target_val = 100; break;
-            default: break;
-        }
-
-        // 获取攻击者价值 (LVA)
-        switch(source_piece) {
-            case King: source_val = 10000; break;
-            case Rook: source_val = 900; break;
-            case Cannon: source_val = 450; break;
-            case Knight: source_val = 400; break;
-            case Bishop: source_val = 200; break;
-            case Assistant: source_val = 200; break;
-            case Pawn: source_val = 100; break;
-            default: break;
-        }
-
-        // 确保排在不吃子的走法前面。
-        // target_val*10 确保受害者的价值占据绝对主导。
-        score = 10000 + target_val*10 - source_val;
-    }
-    
-    // 如果没有吃子，返回 0
-    return score;
-}
-*/
-//现有策略随着递归深度加深会导致速度严重下降
-//上面一个极简的MVV/LVA评估函数，时间复杂度O(1)确保吃子走法优先于不吃子走法，并在吃子走法中优先考虑高价值受害者和低价值攻击者的组合，分数生成应该采用更合适等等策略。
-//方案1：浅层保持全面评估，深层使用MVV/LVA评估以节省时间
-//方案2：将棋子价值进行排序，优先搜索高价值受害者的吃子走法，让关键子的棋布被优先搜索，避免时间浪费在低价值棋子上，在深度到达一定程度时可以考虑完全舍弃非关键棋子的搜索
-//方案3：在搜索中如果发现敌我双方分数差异过大，可以考虑提前剪枝，舍弃那些明显不利的走法
-//注意！第二种方案在评估阶段就进行可能导致被将军时严重忽略士相的保护步法，为防止该情况建议分支在排序中沉底而不是过早剪枝
-//注意！第三种方案需要谨慎使用，过早剪枝可能导致错过关键的防守或反击机会，建议设置一个合理的阈值，并结合其他评估指标进行判断，以避免过度剪枝导致的误判。
-//不建议三种方案同时启用，会使搜索异常复杂，建议使用单一或一种主导第二种辅助的方案
-
 
 //填充MoveNode，并排序
 void ChessAI::fillinMoveNodes(vector<MoveNode>& nodes) {
@@ -2372,7 +2475,13 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     int max_depth = 10;
     int alpha = minstateval;
     int beta = maxstateval;
-  
+    
+    //搜素开始前，清空杀手着法表
+    for(int i = 0;i < max_depth;i ++){
+        killerMoves[i][0] = Move();   //默认构造
+        killerMoves[i][1] = Move();
+    }
+
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
 
@@ -2522,16 +2631,41 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
     //置换表着法启发(Transposition Table Ordering)
     //原理：如果之前搜素过该局面，最佳着法会被保留，并强制将其提到第一位搜素
+
+    //=====HashTable排序    =====\\
+
+
+    int next_idx = 0;
     if(best_TT_Move.source_x != -1){
         for(int i = 0;i < tmpMoveNodes.size();i ++){
             if(tmpMoveNodes[i].strategy == best_TT_Move){
+                //=========将置换表最佳着法和杀手着法提升到前列===========\\ : 都能以最小代价最快剪枝
                 std::swap(tmpMoveNodes[0],tmpMoveNodes[i]);
+                next_idx = 1;
                 break;
             }
         }
     }
+    //=====HashTable排序完成=====\\
 
-    //=====HashTable搜素完成=====\\
+    //=====杀手着法启发排序 =====\\
+    //检查本深度的两个杀手着法并将其提升到next_idx位(HashTable(prior) -> killerMove)
+    for(int k = 0;k < 2;k ++){
+        if(killerMoves[depth][k].source_x != -1){
+            //从next_idx开始
+            for(int i = next_idx;i < tmpMoveNodes.size();i ++){
+                if(tmpMoveNodes[i].strategy == killerMoves[depth][k]){
+                    std::swap(tmpMoveNodes[next_idx],tmpMoveNodes[i]);
+                    next_idx ++;
+                    break;
+                }
+            }
+        }
+    }
+    //=====杀手着法启发排序完成 =====\\
+
+
+
 
     //记录TT 表中，所得到的最优节点
     int original_alpha = alpha;
@@ -2544,10 +2678,9 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     int moveIndex = 0; //LMR ———— 当前是第几个着法
 
     for(auto& node : tmpMoveNodes){
+        bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
         {
             MoveGuard guard(this, node);
-
-            bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
 
             if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
 
@@ -2559,7 +2692,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                     val = -alpha_beta_PVS_search(depth - 1 - R, -alpha - 1,-alpha);
 
                     if(val > alpha){
-                        val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
+                        val = -alpha_beta_PVS_search(depth - 1, -beta,-alpha);//需要全窗口搜索
                     }
                 }else{
                     //否则，使用常规的PVS零窗口搜素
@@ -2574,7 +2707,8 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             }else{
                 val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
             }
-        }
+        } //这里的括号用于限制MoveGuard作用域
+        moveIndex++;//尝试后moveIndex递增 
 
         if(val > alpha){
             best_move = node.strategy;
@@ -2583,6 +2717,21 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         if(val >= beta){ //beta剪枝
             //beta剪枝，引发截断，记录为Beta节点
             RecordHash(curkey,depth,beta,BETA,node.strategy);
+            
+
+            //记录本层的杀手着法 
+            //===================杀手着法逻辑=====================\\
+
+            //当一个节点是的val >= beta，并且本着法为Quiet Move，将本着法记录 ———— 这说明着法具有巨大价值
+            //吃子着法本身价值高，待添加吃子排序先验。这里仅考虑白手着法
+
+            if(isQuiet){
+                if(!(killerMoves[depth][0] == node.strategy)){
+                    killerMoves[depth][1] = killerMoves[depth][0];
+                    killerMoves[depth][0] = node.strategy;
+                }
+            }
+
             return beta;
         }
 /*
@@ -2667,19 +2816,39 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
 
 int ChessAI::quiescence_search(int alpha, int beta) {
     searchTime.check();
-    int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor); 
-    
-    if (stand >= beta) {
-        return beta;
+
+    int kingX = -1, kingY = -1;
+    for (int x = 3; x <= 5; x++) { 
+        for (int y = 0; y <= 9; y++) {
+            auto& grid = board->state[board->currTurnId][board->xy2pos(x, y)];
+            if (grid.color == board->currColor && grid.type == King) {
+                kingX = x; 
+                kingY = y;
+                break;
+            }
+        }
+        if (kingX != -1) break;
     }
-    if (stand > alpha) {
-        alpha = stand;
+    
+    bool inCheck = board->attacked(board->oppColor(), kingX, kingY);
+
+    if (!inCheck) {
+        int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);
+        if (stand >= beta) {
+            return beta;
+        }
+        if (stand > alpha) {
+            alpha = stand;
+        }
     }
 
     vector<Move> tmpMoves;
-    board->generateMovesWithForbidden(tmpMoves); 
+    board->generateMovesWithForbidden(tmpMoves);
+    if (inCheck && tmpMoves.empty()) {
+        return minstateval + 1000; 
+    }
 
-    vector<MoveNode> captureNodes;
+    vector<MoveNode> nextNodes;
     auto& currState = board->state[board->currTurnId];
     
     for (const auto& m : tmpMoves) {
@@ -2688,25 +2857,25 @@ int ChessAI::quiescence_search(int alpha, int beta) {
         
         stoneType victim = currState[targetPos].type;
         stoneType attacker = currState[sourcePos].type;
-
-        if (victim != None) // 仅筛选吃子着法
-        {
+        if (inCheck || victim != None) {
             MoveNode node;
             node.strategy = m;
-            // 调用封装好的 MVV/LVA 策略
-            node.value =Tuning::getMVVLVAScore(attacker, victim); 
-            captureNodes.push_back(node);
+            
+            if (victim != None) {
+                node.value = Tuning::getMVVLVAScore(attacker, victim) + 100000; 
+            } else {
+                node.value = 0; 
+            }
+            nextNodes.push_back(node);
         }
     }
 
     // 降序排序
-    this->MoveNodesort(captureNodes);
-
-    // 遍历吃子着法深入博弈树
-    for (auto& node : captureNodes) {
+    this->MoveNodesort(nextNodes);
+    for (auto& node : nextNodes) {
         int val;
         {
-            MoveGuard guard(this, node); // 走这步吃子棋
+            MoveGuard guard(this, node);
             val = -quiescence_search(-beta, -alpha); 
         }
         if (val >= beta) {
