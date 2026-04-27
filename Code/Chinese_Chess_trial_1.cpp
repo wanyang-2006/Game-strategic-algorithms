@@ -390,7 +390,7 @@ public:
     void copyBoard(Chess *currentBoard) { board = currentBoard; } //
 
     int GridControl[2][90];  //红 / 黑方在9*10棋盘上控制的 点数(红:0 黑:1)
-    bool havecontrol[90];    //所控制的点上，有对方的棋子为true
+    bool havecontrol[90];    //不是“是否控制了该点”，而是对于该位置上的我方棋子，所所控制的点上，有对方的棋子为true，即某个棋子是否有吃到对方棋子的机会
 
     bool isKingattacked;
     vector<Grid> curstones;
@@ -1857,7 +1857,6 @@ void EvalRecord::getGridcontrol(){
     for(int side = 0; side < 2; side ++){
         for(int pos = 0; pos < 90; pos ++){
             GridControl[side][pos] = 0;
-            this->havecontrol[pos] = false;
         }
     }
 
@@ -2034,7 +2033,7 @@ void EvalRecord::getGridcontrol(){
                             GridControl[colorId][board->xy2pos(tx, ty)] ++;
                         }
                         if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                            this->havecontrol[board->xy2pos(x,y)] = true;
+                            this->havecontrol[board->xy2pos(x,y)] = true; //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
                         }
                     }
                 }
