@@ -1859,6 +1859,7 @@ void EvalRecord::getGridcontrol(){
     for(int side = 0; side < 2; side ++){
         for(int pos = 0; pos < 90; pos ++){
             GridControl[side][pos] = 0;
+            this->havecontrol[pos] = false;
         }
     }
 
