@@ -2475,8 +2475,14 @@ int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
 
     auto target_piece = curstate[target_pos].type;
     auto source_piece = curstate[source_pos].type;
+if (target_piece == None) {
+        return 0; // 不吃子时的得分
+    }
 
-    return Tuning::getMVVLVAScore(source_piece, target_piece);
+    colorType oppCol = board->oppColor(color);
+    bool isProtected = board->isattacked(oppCol, cur.target_x, cur.target_y);
+
+    return Tuning::getMVVLVAScore(source_piece, target_piece, isProtected);
 }
 
 /*
@@ -3015,19 +3021,31 @@ int ChessAI::quiescence_search(int alpha, int beta) {
     for (const auto& m : tmpMoves) {
         int targetPos = board->xy2pos(m.target_x, m.target_y);
         int sourcePos = board->xy2pos(m.source_x, m.source_y);
-        
+    
         stoneType victim = currState[targetPos].type;
         stoneType attacker = currState[sourcePos].type;
         if (inCheck || victim != None) {
             MoveNode node;
             node.strategy = m;
+            if(victim!=None)
+            {
+                bool isProtected = board->isattacked(board->oppColor(), m.target_x,m.target_y);
             
-            if (victim != None) {
-                node.value = Tuning::getMVVLVAScore(attacker, victim) + 100000; 
-            } else {
-                node.value = 0; 
+                if(!inCheck && isProtected&& Tuning::VictimValue[victim]<Tuning::AttackerValue[attacker])
+                {
+                    if(Tuning::VictimValue[victim]<3)
+                    {
+                    continue;
+                    }
+                }
+            
+                int mvvlva = Tuning::getMVVLVAScore(attacker,victim,isProtected);
+                node.value=mvvlva+10000;
+            }else{
+                node.value=0;
             }
             nextNodes.push_back(node);
+            
         }
     }
 

@@ -1,10 +1,10 @@
 #include <iostream>
 #include <string>
+#include <vector>
 #include <cmath>
 #include <map>
 #include <cassert>
 #include <algorithm>
-#include <vector>
 #include <stdexcept>
 #include <time.h>
 #include "jsoncpp/json.h"
@@ -390,7 +390,7 @@ public:
     void copyBoard(Chess *currentBoard) { board = currentBoard; } //
 
     int GridControl[2][90];  //红 / 黑方在9*10棋盘上控制的 点数(红:0 黑:1)
-    bool havecontrol[90];    //所控制的点上，有对方的棋子为true
+    bool havecontrol[90];    //不是“是否控制了该点”，而是对于该位置上的我方棋子，所所控制的点上，有对方的棋子为true，即某个棋子是否有吃到对方棋子的机会
 
     bool isKingattacked;
     vector<Grid> curstones;
@@ -2033,7 +2033,7 @@ void EvalRecord::getGridcontrol(){
                             GridControl[colorId][board->xy2pos(tx, ty)] ++;
                         }
                         if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                            this->havecontrol[board->xy2pos(x,y)] = true;
+                            this->havecontrol[board->xy2pos(x,y)] = true; //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
                         }
                     }
                 }
@@ -2240,6 +2240,8 @@ const int OwnHalf = 2;        //我方半场
 const int OwnKingArea = 3;    //我方九宫区域 ———— 次次重要
 const int attackweight = 1;       //或使用double，进攻权重
 const int defenceweight = 1;      //或使用double，防御权重
+
+//没有实现双方真正对比
 int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
     //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
     int myattack = 0,myDefense = 0; 
@@ -2252,21 +2254,21 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
             auto& tmpgrid = target[board->xy2pos(x,y)];
             int pos = board->xy2pos(x,y);
 
-            if(idx == 0){
+            if(idx == 0){//红方打分
                 if(y <= 4){ //红方半场
                     if(board->inKingArea(x,y,RED)){
                         myDefense += GridControl[idx][pos] * OwnKingArea;
                     }else{
                         myDefense += GridControl[idx][pos] * OwnHalf;
                     }
-                }else{
-                    if(board->inKingArea(x,y,RED)){
+                }else{ //y >= 5
+                    if(board->inKingArea(x,y,BLACK)){
                         myattack += GridControl[idx][pos] * EnemyKingArea;
                     }else{
                         myattack += GridControl[idx][pos] * EnemyHalf;
                     }
                 }
-            }else{
+            }else{//黑方打分
                 if(y >= 5){ //黑方半场
                     if(board->inKingArea(x,y,BLACK)){
                         myDefense += GridControl[idx][pos] * OwnKingArea;
@@ -2274,7 +2276,7 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
                         myDefense += GridControl[idx][pos] * OwnHalf;
                     }
                 }else{
-                    if(board->inKingArea(x,y,BLACK)){
+                    if(board->inKingArea(x,y,RED)){
                         myattack += GridControl[idx][pos] * EnemyKingArea;
                     }else{
                         myattack += GridControl[idx][pos] * EnemyHalf;
@@ -2283,7 +2285,44 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
             }
         }
     }
-    
+
+
+    for(int y = 9;y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            auto& tmpgrid = target[board->xy2pos(x,y)];
+            int pos = board->xy2pos(x,y);
+
+            if(idx == 0){//红方给黑方（对手打分）
+                if(y <= 4){ //红方半场
+                    if(board->inKingArea(x,y,RED)){
+                        oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppattack += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }else{ //y >= 5
+                    if(board->inKingArea(x,y,BLACK)){
+                        oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }
+            }else{//黑方打分
+                if(y >= 5){ //黑方半场
+                    if(board->inKingArea(x,y,BLACK)){
+                        oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppattack += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }else{
+                    if(board->inKingArea(x,y,BLACK)){
+                        oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
+                    }else{
+                        oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
+                    }
+                }
+            }
+        }
+    }
     //进攻度分析 ———— Gridcontrol 我方在对方半场的控制点、对方在对方半场的控制点
 
     //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
@@ -2315,7 +2354,14 @@ int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
     auto target_piece = curstate[target_pos].type;
     auto source_piece = curstate[source_pos].type;
 
-    return Tuning::getMVVLVAScore(source_piece, target_piece);
+    if (target_piece == None) {
+        return 0; // 不吃子时的得分
+    }
+
+    colorType oppCol = board->oppColor(color);
+    bool isProtected = board->isattacked(oppCol, cur.target_x, cur.target_y);
+
+    return Tuning::getMVVLVAScore(source_piece, target_piece, isProtected);
 }
 
 /*
@@ -2854,19 +2900,31 @@ int ChessAI::quiescence_search(int alpha, int beta) {
     for (const auto& m : tmpMoves) {
         int targetPos = board->xy2pos(m.target_x, m.target_y);
         int sourcePos = board->xy2pos(m.source_x, m.source_y);
-        
+    
         stoneType victim = currState[targetPos].type;
         stoneType attacker = currState[sourcePos].type;
         if (inCheck || victim != None) {
             MoveNode node;
             node.strategy = m;
+            if(victim!=None)
+            {
+                bool isProtected = board->isattacked(board->oppColor(), m.target_x,m.target_y);
             
-            if (victim != None) {
-                node.value = Tuning::getMVVLVAScore(attacker, victim) + 100000; 
-            } else {
-                node.value = 0; 
+                if(!inCheck && isProtected&& Tuning::VictimValue[victim]<Tuning::AttackerValue[attacker])
+                {
+                    if(Tuning::VictimValue[victim]<3)
+                    {
+                    continue;
+                    }
+                }
+            
+                int mvvlva = Tuning::getMVVLVAScore(attacker,victim,isProtected);
+                node.value=mvvlva+10000;
+            }else{
+                node.value=0;
             }
             nextNodes.push_back(node);
+            
         }
     }
 
@@ -2888,7 +2946,6 @@ int ChessAI::quiescence_search(int alpha, int beta) {
 
     return alpha;
 }
-
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值
