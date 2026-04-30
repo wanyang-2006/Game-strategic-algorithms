@@ -2594,11 +2594,18 @@ void ChessAI::MoveNodeBack(MoveNode& tmpmove){
     this->board->undoMove();
 }
 
+//在搜素树遍历中，管理棋盘状态（落子和取消落子），RAII标准
 struct MoveGuard {
     ChessAI* ai;
     MoveNode& node;
     MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
     ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
+struct NullMoveGuard{
+    ChessAI* ai;
+    NullMoveGuard(ChessAI* a) : ai(a) {ai->board->makeNullMove();}
+    ~NullMoveGuard() {ai->board->undoMove(); }
 };
 
 //该步是否获得胜利
@@ -2737,8 +2744,12 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         this->MoveNodeVoid(); // 执行空步
 
         // 尝试一个零窗口探测计算空步后的局面价值
-        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
-
+        int null_val;
+        //类似于MoveGuard，这里空步仍然需要MoveGuard
+        {
+            NullMoveGuard tmpguard(this);
+            null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+        }
         this->board->undoNullMove(); // 撤销空步
 
         // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
