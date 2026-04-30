@@ -96,66 +96,7 @@ void InitZobrist(){
     }
     ZobristPlayer = randomnum();
 }
-class Chess;
-class Move;
-bool getchessbook(Chess& chess,Move& bookMove){
-    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
-    if(!fin.is_open()){
-        return false;
-    }
 
-    Json::Value book;
-    Json::Reader reader;
-    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
-        return false;            //Json解析失败
-    }
-
-    uint64_t tmpkey = chess.getZobristKey();
-    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
-    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
-        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
-    }
-
-    Json::Value &moves = book[keyStr];
-    // //选择count最大的走法
-    // int bestIdx = 0;
-    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
-
-    // for(int i = 1;i < moves.size();i ++){
-    //     int c = moves[i].get("count",0).asInt();
-    //     if(c > bestCount){
-    //         bestCount = c;
-    //         bestIdx = i;
-    //     }
-    // }
-
-    //在出现频次最高的 Move中随机挑选
-    int selectIdx = 0;
-    vector<int> selectIdxes;           //待选择的多个Move的索引
-    selectIdxes.push_back(selectIdx);  //先加入第一个
-    for(int i = 1;i < moves.size();i ++){
-        int c = moves[i].get("count",0).asInt();
-        if(c > selectIdxes[0]){        
-            selectIdxes.clear();
-        }
-        selectIdxes.push_back(i);
-    }
-
-    srand(time(0));
-    selectIdx = selectIdxes[rand() % selectIdxes.size()];
-
-    const Json::Value &m = moves[selectIdx]["move"];
-
-    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
-
-    //必须再验证合法性
-    if(!chess.isMoveValidWithForbidden(res)){
-        return false;
-    }
-
-    bookMove = res;
-    return true;
-}
 // PGN字符横坐标转数值
 int pgnchar2int(char c)
 {
@@ -381,6 +322,10 @@ public:
 
     //Zobrist Key计算方法 ———— 添加到Chess类中
     uint64_t getZobristKey();
+
+    //实现空步
+    void makeNullMove();
+    void undoNullMove();
 };
 
 //局面评估类 包含评估的各个指标量(特征提取)和评估方法 
@@ -403,6 +348,7 @@ public:
     int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
     int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
     int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    int calShapePenalty(vector<Grid>& target, colorType color);                //计算空头炮或窝心马等特殊阵型罚分
     void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
 
@@ -453,7 +399,7 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
-    int ChessAI::quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
+    int quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
 
     ChessAI();                        //(隐式)实例化新对象
     explicit ChessAI(Chess *board);   //(显式)实例化新对象
@@ -2460,12 +2406,80 @@ const int mydynamicweight = 1;
 const int oppstaticweight = 1;
 const int oppdynamicweight = 1;
 
+//空头炮和窝心马的惩罚分数数组(随敌方炮距我方底线的纵深改变)
+static const int HollowThreat[10] = { 80, 80, 80, 70, 60, 50, 40, 30, 20, 10 };
+static const int CentralThreat[10] = { 100, 100, 90, 80, 70, 60, 50, 40, 30, 20 };
+
+enum AdvisorShapeType {
+    SHAPE_NONE = 0,
+    SHAPE_CENTER = 1, // 中路空虚
+    SHAPE_LEFT = 2,
+    SHAPE_RIGHT = 3
+};
+
+// 计算特殊阵型（空头炮、窝心马）判定造成的罚分，罚分值越大说明阵型越糟糕
+int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
+    int penalty = 0;
+    colorType oppColor = (color == RED) ? BLACK : RED;
+    
+    // 获取我方将帅的位置 (假设坐标系RED阵营底线y=9, BLACK底线y=0)
+    int kingY = (color == RED) ? 9 : 0;
+    int centerM_Y = (color == RED) ? 8 : 1; // 所谓窝心马的位置必定在九宫中心点
+    
+    int kingPos = board->xy2pos(4, kingY);
+    if (target[kingPos].type != King || target[kingPos].color != color) {
+        return 0; // 帅不在初始位置，不套用固定阵型惩罚
+    }
+
+    AdvisorShapeType nShape = SHAPE_NONE;
+    int centerAdvPos = board->xy2pos(4, centerM_Y);
+
+    // 简化判断：如果(4, centerM_Y)没有我方的士，说明中门大开
+    if (target[centerAdvPos].type != Assistant || target[centerAdvPos].color != color) {
+        nShape = SHAPE_CENTER;
+    }
+
+    if (nShape == SHAPE_CENTER) {
+        // 遍历中路(x=4)上的敌方炮
+        for (int y = 0; y <= 9; y++) {
+            int pos = board->xy2pos(4, y);
+            if (target[pos].type == Cannon && target[pos].color == oppColor) {
+                // 判断此敌方中炮与我方将帅之间的障碍物数量
+                int blockCount = board->betweenNotEmptyNum(4, y, 4, kingY);
+                int dist = abs(y - kingY);
+                
+                if (blockCount == 0) {
+                    // 障碍物为0：说明完全是空头炮，被直照
+                    penalty += HollowThreat[dist]; 
+                } 
+                else if (blockCount == 1) {
+                    // 障碍物为1，检查阻挡物是不是我方的窝心马
+                    int blockPos = board->xy2pos(4, centerM_Y);
+                    if (target[blockPos].type == Knight && target[blockPos].color == color) {
+                        penalty += CentralThreat[dist];
+                    }
+                }
+            }
+        }
+    }
+    
+    return penalty;
+}
+
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
 
     int res = 0;
     res += this->calstaticstate(target,color);
     res += this->caldynamicstate(target,color);
+    
+    // 特殊棋形扣分、静态评估、动态评估
+    colorType oppCol = (color == RED) ? BLACK : RED;
+    int myShapePenalty = this->calShapePenalty(target, color);
+    int oppShapePenalty = this->calShapePenalty(target, oppCol);
+    res = res - myShapePenalty + oppShapePenalty;
+
+    
     return res;
 }
 
@@ -2546,14 +2560,29 @@ void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
     //快速排序 vector<MoveNode> 
     sort(nodes.begin(), nodes.end(), MoveNodecmp);
 }
+void Chess::makeNullMove(){
+    state.push_back(state[currTurnId]);
+    currTurnId ++;
+    continuePeaceTurn.push_back(continuePeaceTurn[currTurnId - 1] + 1);
+    lastMoveEaten.push_back(false);
+    currColor = oppColor();
+}
+void Chess::undoNullMove(){
+    undoMove();
+}
+//错误，以下不是空步，而是“伪装成空步的落子”，未必合法！
+// void ChessAI::MoveNodeVoid(){
+//     Move tmpmove;
+//     //让棋局在此步原地踏步
+//     tmpmove.source_x = 1;
+//     tmpmove.source_y = 1;
+//     tmpmove.target_x = 1;
+//     tmpmove.target_y = 1;
+//     board->makeMoveAssumeLegal(tmpmove);
+// }
+
 void ChessAI::MoveNodeVoid(){
-    Move tmpmove;
-    //让棋局在此步原地踏步
-    tmpmove.source_x = 1;
-    tmpmove.source_y = 1;
-    tmpmove.target_x = 1;
-    tmpmove.target_y = 1;
-    board->makeMoveAssumeLegal(tmpmove);
+    this->board->makeNullMove();
 }
 
 void ChessAI::MoveNodeFront(MoveNode& tmpmove){
@@ -2710,7 +2739,7 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         // 尝试一个零窗口探测计算空步后的局面价值
         int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
 
-        this->board->undoMove(); // 撤销空步
+        this->board->undoNullMove(); // 撤销空步
 
         // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
         if (null_val >= beta) {
@@ -2779,7 +2808,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         // 尝试一个零窗口探测计算空步后的局面价值
         int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
 
-        this->board->undoMove(); // 撤销空步
+        this->board->undoNullMove(); // 撤销空步
 
         // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
         if (null_val >= beta) {
@@ -2975,10 +3004,116 @@ bool ChessAI::haveattack_of_valuestone(vector<Grid>& tmp,colorType color){
 
 //是否为“白手”
 
+//错误写法：
+
+/*
 bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
     MoveNodeFront(tmpmove);
+    
     this->evaluator.getGridcontrol();
     return havethreat(board->state[board->currTurnId],board->currColor);
+}
+*/
+
+//这里移动一步没有回撤！
+
+bool ChessAI::isQuietMove(vector<Grid>& tmpgrid, MoveNode& tmpmove)
+{
+    if (board == nullptr) {
+        throw std::runtime_error("(isQuietMove) board is null");
+    }
+
+    const Move& move = tmpmove.strategy;
+
+    // 1. 基本坐标安全检查
+    if (!Chess::inBoard(move.source_x, move.source_y) ||
+        !Chess::inBoard(move.target_x, move.target_y)) {
+        return false; // 非法走法不能当作安静着法
+    }
+
+    int sourcePos = board->xy2pos(move.source_x, move.source_y);
+    int targetPos = board->xy2pos(move.target_x, move.target_y);
+
+    if (sourcePos < 0 || sourcePos >= 90 || targetPos < 0 || targetPos >= 90) {
+        return false;
+    }
+
+    if (tmpgrid.size() != 90) {
+        throw std::runtime_error("(isQuietMove) invalid board state size");
+    }
+
+    const Grid& sourceGrid = tmpgrid[sourcePos];
+    const Grid& targetGrid = tmpgrid[targetPos];
+
+    // 2. 源格必须是当前行动方棋子，否则不能认为是正常安静步
+    if (sourceGrid.color != board->currColor || sourceGrid.type == None) {
+        return false;
+    }
+
+    // 3. 吃子着法不是安静着法
+    bool isCapture = (targetGrid.color != EMPTY && targetGrid.color != sourceGrid.color);
+    if (isCapture) {
+        return false;
+    }
+
+    // 4. 用 MoveGuard 临时执行该步，作用域结束自动回撤
+    bool givesCheck = false;
+    bool createsValuableThreat = false;
+
+    {
+        MoveGuard guard(this, tmpmove);
+
+        // 执行 tmpmove 后，board->currColor 已经切换为对手颜色。
+        // 因此此时 currColor 表示“被走完这步后轮到行动的一方”，也就是对手。
+        colorType opponentAfterMove = board->currColor;
+        colorType moverColor = board->oppColor();
+
+        // 4.1 判断是否将军：查找对手将帅是否被刚刚行动的一方攻击
+        int oppKingX = -1;
+        int oppKingY = -1;
+
+        for (int x = 0; x < BOARDWIDTH; ++x) {
+            for (int y = 0; y < BOARDHEIGHT; ++y) {
+                const Grid& g = board->state[board->currTurnId][board->xy2pos(x, y)];
+                if (g.color == opponentAfterMove && g.type == King) {
+                    oppKingX = x;
+                    oppKingY = y;
+                    break;
+                }
+            }
+            if (oppKingX != -1) {
+                break;
+            }
+        }
+
+        // 如果对方将帅不存在，说明这是终局/异常战术局面，绝不应当视为安静着法
+        if (oppKingX == -1) {
+            return false;
+        }
+
+        givesCheck = board->attacked(moverColor, oppKingX, oppKingY);
+        if (givesCheck) {
+            return false;
+        }
+
+        // 4.2 判断是否制造了对方重要棋子的威胁。
+        // 注意：执行走子后，board->currColor 是对手。
+        // havethreat_of_valuestone(state, opponentAfterMove)
+        // 含义是：对手的重要棋子是否被当前刚走棋的一方攻击。
+        createsValuableThreat =
+            this->havethreat_of_valuestone(
+                board->state[board->currTurnId],
+                opponentAfterMove
+            );
+
+        if (createsValuableThreat) {
+            return false;
+        }
+    }
+
+    // 走到这里时，MoveGuard 已经自动 undoMove()，棋盘状态恢复。
+    // 非吃子、非将军、非捉重要子，才认为是安静着法。
+    return true;
 }
 
 int ChessAI::quiescence_search(int alpha, int beta) {
@@ -3066,6 +3201,66 @@ int ChessAI::quiescence_search(int alpha, int beta) {
     }
 
     return alpha;
+}
+
+
+bool getchessbook(Chess& chess,Move& bookMove){
+    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
+    if(!fin.is_open()){
+        return false;
+    }
+
+    Json::Value book;
+    Json::Reader reader;
+    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
+        return false;            //Json解析失败
+    }
+
+    uint64_t tmpkey = chess.getZobristKey();
+    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
+    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
+        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
+    }
+
+    Json::Value &moves = book[keyStr];
+    // //选择count最大的走法
+    // int bestIdx = 0;
+    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
+
+    // for(int i = 1;i < moves.size();i ++){
+    //     int c = moves[i].get("count",0).asInt();
+    //     if(c > bestCount){
+    //         bestCount = c;
+    //         bestIdx = i;
+    //     }
+    // }
+
+    //在出现频次最高的 Move中随机挑选
+    int selectIdx = 0;
+    vector<int> selectIdxes;           //待选择的多个Move的索引
+    selectIdxes.push_back(selectIdx);  //先加入第一个
+    for(int i = 1;i < moves.size();i ++){
+        int c = moves[i].get("count",0).asInt();
+        if(c > selectIdxes[0]){        
+            selectIdxes.clear();
+        }
+        selectIdxes.push_back(i);
+    }
+
+    srand(time(0));
+    selectIdx = selectIdxes[rand() % selectIdxes.size()];
+
+    const Json::Value &m = moves[selectIdx]["move"];
+
+    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
+
+    //必须再验证合法性
+    if(!chess.isMoveValidWithForbidden(res)){
+        return false;
+    }
+
+    bookMove = res;
+    return true;
 }
 
 //PVS算法
