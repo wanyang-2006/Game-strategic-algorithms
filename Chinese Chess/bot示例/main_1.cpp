@@ -96,66 +96,7 @@ void InitZobrist(){
     }
     ZobristPlayer = randomnum();
 }
-class Chess;
-class Move;
-bool getchessbook(Chess& chess,Move& bookMove){
-    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
-    if(!fin.is_open()){
-        return false;
-    }
 
-    Json::Value book;
-    Json::Reader reader;
-    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
-        return false;            //Json解析失败
-    }
-
-    uint64_t tmpkey = chess.getZobristKey();
-    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
-    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
-        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
-    }
-
-    Json::Value &moves = book[keyStr];
-    // //选择count最大的走法
-    // int bestIdx = 0;
-    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
-
-    // for(int i = 1;i < moves.size();i ++){
-    //     int c = moves[i].get("count",0).asInt();
-    //     if(c > bestCount){
-    //         bestCount = c;
-    //         bestIdx = i;
-    //     }
-    // }
-
-    //在出现频次最高的 Move中随机挑选
-    int selectIdx = 0;
-    vector<int> selectIdxes;           //待选择的多个Move的索引
-    selectIdxes.push_back(selectIdx);  //先加入第一个
-    for(int i = 1;i < moves.size();i ++){
-        int c = moves[i].get("count",0).asInt();
-        if(c > selectIdxes[0]){        
-            selectIdxes.clear();
-        }
-        selectIdxes.push_back(i);
-    }
-
-    srand(time(0));
-    selectIdx = selectIdxes[rand() % selectIdxes.size()];
-
-    const Json::Value &m = moves[selectIdx]["move"];
-
-    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
-
-    //必须再验证合法性
-    if(!chess.isMoveValidWithForbidden(res)){
-        return false;
-    }
-
-    bookMove = res;
-    return true;
-}
 // PGN字符横坐标转数值
 int pgnchar2int(char c)
 {
@@ -381,6 +322,10 @@ public:
 
     //Zobrist Key计算方法 ———— 添加到Chess类中
     uint64_t getZobristKey();
+
+    //实现空步
+    void makeNullMove();
+    void undoNullMove();
 };
 
 //局面评估类 包含评估的各个指标量(特征提取)和评估方法 
@@ -399,9 +344,11 @@ public:
     bool isattacked(colorType color, int mx, int my);                          //(对方的棋子颜色，我方的棋子位置x y) 某一方方位于mx my点的棋子是否可能被吃
     bool hasattackchance(int mx,int my);                                       //当前位于x y处的棋子是否有吃子的可能
     bool ismiddlecompostion(vector<Grid>& target);                             //是否为中局 / 残局
+    int getMidgameWeight(vector<Grid>& target);                                //计算当前属于中局的权重比(x/T)
     int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
     int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
     int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    int calShapePenalty(vector<Grid>& target, colorType color);                //计算空头炮或窝心马等特殊阵型罚分
     void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
 
@@ -429,6 +376,7 @@ public:
     Move killerMoves[max_depth][2];                            //杀手着法表，假设最大搜素深度为Max_Search_Depth 每层杀手着法数目设为2
     // ChessAI方法                                      
     bool getWin();                                                            //更新isWin,判断是否胜利
+    bool iftmpLose();                                                         //当前走棋的一方是否没有将/帅
     void getcurstones(void);
     void generateMovesWithForbidden();                                        //对应board的同名方法
     void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
@@ -452,7 +400,7 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
-    int ChessAI::quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
+    int quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
 
     ChessAI();                        //(隐式)实例化新对象
     explicit ChessAI(Chess *board);   //(显式)实例化新对象
@@ -2065,159 +2013,130 @@ bool EvalRecord::ismiddlecompostion(vector<Grid>& vec){
             }else if(vec[board->xy2pos(x,y)].type == Knight || vec[board->xy2pos(x,y)].type == Cannon){
                 tmp += HorseCannon_state;
             }else{
-                tmp += other_state;
+
             }
+            
+            //删除other分支
         }
     }
     return tmp > (Total_state / 2);
 }
 
+int EvalRecord::getMidgameWeight(vector<Grid>& target){
+    int tmp = 0;
+    for(int y = 9;y >= 0;y --){
+        for(int x = 0;x <= 8;x ++){
+            auto& tmpgrid = target[board->xy2pos(x,y)];
+            if(tmpgrid.type == None || tmpgrid.color == EMPTY){
+                continue;
+            }
+            if(tmpgrid.type == Rook){
+                tmp += Rook_state;
+            }else if(tmpgrid.type == Knight || tmpgrid.type == Cannon){
+                tmp += HorseCannon_state;
+            }else{
+                tmp += other_state;
+            }
+        }
+    }
+    //二次函数插值
+
+    int midgameWeight = (2 * Total_state - tmp) * tmp / Total_state;
+    if(midgameWeight < 0)midgameWeight = 0;
+    if(midgameWeight > Total_state)midgameWeight = Total_state;
+
+    return midgameWeight;
+}
+
 //注意：静态棋力表中的数据均为对红方而言的数据，颜色不同时，需要翻转————(9 - x,10 - y)
 //参考Eleeye中的静态估值 vec调用board->state中的当前状态
-int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
+int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
 {
     if(this->board == nullptr){
         throw(std::runtime_error("(calstaticstate)board is null"));
     }
-    bool ismiddle = ismiddlecompostion(vec);
+   
     colorType oppCol = (color == RED) ? BLACK : RED;
     int res = 0;
+    // 计算当前局面的中局权重
+    int weightMid = getMidgameWeight(target);
+    int weightEnd = Total_state - weightMid;
 
-    //红方 中局
-    if(color == RED && ismiddle){
-        for(int y = 9;y >= 0;y --){
-            for(int x = 0;x <= 8;x ++){
-                if(vec[board->xy2pos(x,y)].color != RED)continue;
+    for (int y = 9; y >= 0; y--) {
+        for (int x = 0; x <= 8; x++) {
+            auto& curGrid = target[board->xy2pos(x, y)];
+            if (curGrid.type == None || curGrid.color == EMPTY) continue;
+            
+            // 静态棋力表是以红方视角建立，所以如果是黑方需要翻转纵坐标
+            int viewY = (curGrid.color == RED) ? y : (9 - y);
+            int posIndex = 9 * viewY + x;
 
-                switch (vec[board->xy2pos(x,y)].type)
-                {
-                case None:
-                    break;
+            if (curGrid.color == color) { // 计算我方加分
+                int midValue = 0;
+                int endValue = 0;
+
+                switch (curGrid.type) {
                 case Pawn:
-                case King:{
-                    bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? mid_KingPawn_attack[81 - 9 * y + x] : mid_KingPawn_no_attack[81 - 9 * y  + x];
+                case King: {
+                    bool flag = this->hasattackchance(x, y);
+                    midValue = flag ? mid_KingPawn_attack[posIndex] : mid_KingPawn_no_attack[posIndex];
+                    endValue = flag ? end_KingPawn_attack[posIndex] : end_KingPawn_no_attack[posIndex];
+                    // 只有将帅/兵卒有明显的中残局阶段变化
+                    res += (midValue * weightMid + endValue * weightEnd) / Total_state;
                     break;
                 }
                 case Assistant:
-                case Bishop:{
+                case Bishop: {
                     bool flag = this->isattacked(oppCol, x, y);
-                    res += (flag) ? mid_AdvBis_Threat[81 - 9 * y + x] : mid_AdvBis_no_Threat[81 - 9 * y + x];
+                    // 仕相受威胁分通常不受残/中局影响或者直接取中局表
+                    res += flag ? mid_AdvBis_Threat[posIndex] : mid_AdvBis_no_Threat[posIndex];
                     break;
                 }
                 case Knight:
-                    res += mid_horse[81 - 9 * y + x];
+                    res += (mid_horse[posIndex] * weightMid + end_horse[posIndex] * weightEnd) / Total_state;
                     break;
                 case Rook:
-                    res += mid_Rook[81 - 9 * y + x];
+                    res += (mid_Rook[posIndex] * weightMid + end_Rook[posIndex] * weightEnd) / Total_state;
                     break;
                 case Cannon:
-                    res += mid_Cannon[81 - 9 * y + x];
+                    res += (mid_Cannon[posIndex] * weightMid + end_Cannon[posIndex] * weightEnd) / Total_state;
                     break;
                 default:
                     break;
                 }
-            }
-        }
-    }else if(color == RED && !ismiddle){ //红色 残局
-        for(int y = 9;y >= 0;y --){
-            for(int x = 0;x <= 8;x ++){
-                if(vec[board->xy2pos(x,y)].color != RED)continue;
+            } 
+            else { // 计算敌方减分
+                // 与上方逻辑同样修改处理，使用：
+                // res -= (midValue * weightMid + endValue * weightEnd) / Total_state;
+                // ...
+                int midValue = 0;
+                int endValue = 0;
 
-                switch (vec[board->xy2pos(x,y)].type)
-                {
-                case None:
-                    break;
+                switch (curGrid.type) {
                 case Pawn:
-                case King:{
-                    bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? end_KingPawn_attack[81 - 9 * y + x] : end_KingPawn_no_attack[81 - 9 * y  + x];
+                case King: {
+                    bool flag = this->hasattackchance(x, y);
+                    midValue = flag ? mid_KingPawn_attack[posIndex] : mid_KingPawn_no_attack[posIndex];
+                    endValue = flag ? end_KingPawn_attack[posIndex] : end_KingPawn_no_attack[posIndex];
+                    // 只有将帅/兵卒有明显的中残局阶段变化
+                    res -= (midValue * weightMid + endValue * weightEnd) / Total_state;
                     break;
                 }
                 case Assistant:
-                case Bishop:{
+                case Bishop: {
                     bool flag = this->isattacked(oppCol, x, y);
-                    res += (flag) ? mid_AdvBis_Threat[81 - 9 * y + x] : mid_AdvBis_no_Threat[81 - 9 * y + x];
+                    // 仕相受威胁分通常不受残/中局影响或者直接取中局表
+                    res -= flag ? mid_AdvBis_Threat[posIndex] : mid_AdvBis_no_Threat[posIndex];
                     break;
                 }
                 case Knight:
-                    res += end_horse[81 - 9 * y + x];
+                    res -= (mid_horse[posIndex] * weightMid + end_horse[posIndex] * weightEnd) / Total_state;
                     break;
                 case Rook:
-                    res += end_Rook[81 - 9 * y + x];
+                    res -= (mid_Rook[posIndex] * weightMid + end_Rook[posIndex] * weightEnd) / Total_state;
                     break;
                 case Cannon:
-                    res += end_Cannon[81 - 9 * y + x];
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-    }else if(color == BLACK && ismiddle){
-        for(int y = 9;y >= 0;y --){
-            for(int x = 0;x <= 8;x ++){
-                if(vec[board->xy2pos(x,y)].color != BLACK)continue;
-
-                switch (vec[board->xy2pos(x,y)].type)
-                {
-                case None:
-                    break;
-                case Pawn:
-                case King:{
-                    bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? mid_KingPawn_attack[9 * y + x] : mid_KingPawn_no_attack[9 * y + x];
-                    break;
-                }
-                case Assistant:
-                case Bishop:{
-                    bool flag = this->isattacked(oppCol, x, y);
-                    res += (flag) ? mid_AdvBis_Threat[9 * y + x] : mid_AdvBis_no_Threat[9 * y + x];
-                    break;
-                }
-                case Knight:
-                    res += mid_horse[9 * y + x];
-                    break;
-                case Rook:
-                    res += mid_Rook[9 * y + x];
-                    break;
-                case Cannon:
-                    res += mid_Cannon[9 * y + x];
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-    }else{ //color == BLACK && !ismiddle
-        for(int y = 9;y >= 0;y --){
-            for(int x = 0;x <= 8;x ++){
-                if(vec[board->xy2pos(x,y)].color != BLACK)continue;
-
-                switch (vec[board->xy2pos(x,y)].type)
-                {
-                case None:
-                    break;
-                case Pawn:
-                case King:{
-                    bool flag = this->hasattackchance(x,y);
-                    res += (flag) ? end_KingPawn_attack[9 * y + x] : end_KingPawn_no_attack[9 * y + x];
-                    break;
-                }
-                case Assistant:
-                case Bishop:{
-                    bool flag = this->isattacked(oppCol, x, y);
-                    res += (flag) ? mid_AdvBis_Threat[9 * y + x] : mid_AdvBis_no_Threat[9 * y + x];
-                    break;
-                }
-                case Knight:
-                    res += end_horse[9 * y + x];
-                    break;
-                case Rook:
-                    res += end_Rook[9 * y + x];
-                    break;
-                case Cannon:
-                    res += end_Cannon[9 * y + x];
+                    res -= (mid_Cannon[posIndex] * weightMid + end_Cannon[posIndex] * weightEnd) / Total_state;
                     break;
                 default:
                     break;
@@ -2225,15 +2144,164 @@ int EvalRecord::calstaticstate(vector<Grid> &vec, colorType color)
             }
         }
     }
-
     return res;
 }
+//     //计算当前局面的中局权重
+//     int weightMid = getMidgameWeight(vec);
+//     int weightEnd = Total_state - weightMid;
 
-//借鉴eleeye中的一系列动态得分机制
+//     //
+//     //红方 中局
+//     if(color == RED && ismiddle){
+//         for(int y = 9;y >= 0;y --){
+//             for(int x = 0;x <= 8;x ++){
+//                 if(vec[board->xy2pos(x,y)].color != RED)continue;
 
-//1.特殊棋型 空头炮 / 窝心马(暂时不考虑)
-//2.进攻度分析 —————— 对对方半场的控制度
-//3.防御度分析 —————— 对我方半场的控制度
+//                 switch (vec[board->xy2pos(x,y)].type)
+//                 {
+//                 case None:
+//                     break;
+//                 case Pawn:
+//                 case King:{
+//                     bool flag = this->hasattackchance(x,y);
+//                     res += (flag) ? mid_KingPawn_attack[81 - 9 * y + x] : mid_KingPawn_no_attack[81 - 9 * y  + x];
+//                     break;
+//                 }
+//                 case Assistant:
+//                 case Bishop:{
+//                     bool flag = this->isattacked(oppCol, x, y);
+//                     res += (flag) ? mid_AdvBis_Threat[81 - 9 * y + x] : mid_AdvBis_no_Threat[81 - 9 * y + x];
+//                     break;
+//                 }
+//                 case Knight:
+//                     res += mid_horse[81 - 9 * y + x];
+//                     break;
+//                 case Rook:
+//                     res += mid_Rook[81 - 9 * y + x];
+//                     break;
+//                 case Cannon:
+//                     res += mid_Cannon[81 - 9 * y + x];
+//                     break;
+//                 default:
+//                     break;
+//                 }
+//             }
+//         }
+//     }else if(color == RED && !ismiddle){ //红色 残局
+//         for(int y = 9;y >= 0;y --){
+//             for(int x = 0;x <= 8;x ++){
+//                 if(vec[board->xy2pos(x,y)].color != RED)continue;
+
+//                 switch (vec[board->xy2pos(x,y)].type)
+//                 {
+//                 case None:
+//                     break;
+//                 case Pawn:
+//                 case King:{
+//                     bool flag = this->hasattackchance(x,y);
+//                     res += (flag) ? end_KingPawn_attack[81 - 9 * y + x] : end_KingPawn_no_attack[81 - 9 * y  + x];
+//                     break;
+//                 }
+//                 case Assistant:
+//                 case Bishop:{
+//                     bool flag = this->isattacked(oppCol, x, y);
+//                     res += (flag) ? mid_AdvBis_Threat[81 - 9 * y + x] : mid_AdvBis_no_Threat[81 - 9 * y + x];
+//                     break;
+//                 }
+//                 case Knight:
+//                     res += end_horse[81 - 9 * y + x];
+//                     break;
+//                 case Rook:
+//                     res += end_Rook[81 - 9 * y + x];
+//                     break;
+//                 case Cannon:
+//                     res += end_Cannon[81 - 9 * y + x];
+//                     break;
+//                 default:
+//                     break;
+//                 }
+//             }
+//         }
+//     }else if(color == BLACK && ismiddle){
+//         for(int y = 9;y >= 0;y --){
+//             for(int x = 0;x <= 8;x ++){
+//                 if(vec[board->xy2pos(x,y)].color != BLACK)continue;
+
+//                 switch (vec[board->xy2pos(x,y)].type)
+//                 {
+//                 case None:
+//                     break;
+//                 case Pawn:
+//                 case King:{
+//                     bool flag = this->hasattackchance(x,y);
+//                     res += (flag) ? mid_KingPawn_attack[9 * y + x] : mid_KingPawn_no_attack[9 * y + x];
+//                     break;
+//                 }
+//                 case Assistant:
+//                 case Bishop:{
+//                     bool flag = this->isattacked(oppCol, x, y);
+//                     res += (flag) ? mid_AdvBis_Threat[9 * y + x] : mid_AdvBis_no_Threat[9 * y + x];
+//                     break;
+//                 }
+//                 case Knight:
+//                     res += mid_horse[9 * y + x];
+//                     break;
+//                 case Rook:
+//                     res += mid_Rook[9 * y + x];
+//                     break;
+//                 case Cannon:
+//                     res += mid_Cannon[9 * y + x];
+//                     break;
+//                 default:
+//                     break;
+//                 }
+//             }
+//         }
+//     }else{ //color == BLACK && !ismiddle
+//         for(int y = 9;y >= 0;y --){
+//             for(int x = 0;x <= 8;x ++){
+//                 if(vec[board->xy2pos(x,y)].color != BLACK)continue;
+
+//                 switch (vec[board->xy2pos(x,y)].type)
+//                 {
+//                 case None:
+//                     break;
+//                 case Pawn:
+//                 case King:{
+//                     bool flag = this->hasattackchance(x,y);
+//                     res += (flag) ? end_KingPawn_attack[9 * y + x] : end_KingPawn_no_attack[9 * y + x];
+//                     break;
+//                 }
+//                 case Assistant:
+//                 case Bishop:{
+//                     bool flag = this->isattacked(oppCol, x, y);
+//                     res += (flag) ? mid_AdvBis_Threat[9 * y + x] : mid_AdvBis_no_Threat[9 * y + x];
+//                     break;
+//                 }
+//                 case Knight:
+//                     res += end_horse[9 * y + x];
+//                     break;
+//                 case Rook:
+//                     res += end_Rook[9 * y + x];
+//                     break;
+//                 case Cannon:
+//                     res += end_Cannon[9 * y + x];
+//                     break;
+//                 default:
+//                     break;
+//                 }
+//             }
+//         }
+//     }
+
+//     return res;
+// }
+
+// //借鉴eleeye中的一系列动态得分机制
+
+// //1.特殊棋型 空头炮 / 窝心马(暂时不考虑)
+// //2.进攻度分析 —————— 对对方半场的控制度
+// //3.防御度分析 —————— 对我方半场的控制度
 const int EnemyKingArea = 8;  //敌方九宫区域 ———— 最为重要，唯有控制敌方九宫才有夺取胜利的机会！
 const int EnemyHalf = 5;       
 const int OwnHalf = 2;        //我方半场
@@ -2242,6 +2310,7 @@ const int attackweight = 1;       //或使用double，进攻权重
 const int defenceweight = 1;      //或使用double，防御权重
 
 //没有实现双方真正对比
+
 int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
     //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
     int myattack = 0,myDefense = 0; 
@@ -2328,7 +2397,7 @@ int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
     //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
 
     //最终结果为：我方总得分 - 对方总得分
-    int res = attackweight * (myattack - oppattack) + defenceweight * (myDefense - oppDefence);
+    int res = myattack + myDefense - oppattack - oppDefence;
     return res;
 }
 
@@ -2338,12 +2407,80 @@ const int mydynamicweight = 1;
 const int oppstaticweight = 1;
 const int oppdynamicweight = 1;
 
+//空头炮和窝心马的惩罚分数数组(随敌方炮距我方底线的纵深改变)
+static const int HollowThreat[10] = { 80, 80, 80, 70, 60, 50, 40, 30, 20, 10 };
+static const int CentralThreat[10] = { 100, 100, 90, 80, 70, 60, 50, 40, 30, 20 };
+
+enum AdvisorShapeType {
+    SHAPE_NONE = 0,
+    SHAPE_CENTER = 1, // 中路空虚
+    SHAPE_LEFT = 2,
+    SHAPE_RIGHT = 3
+};
+
+// 计算特殊阵型（空头炮、窝心马）判定造成的罚分，罚分值越大说明阵型越糟糕
+int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
+    int penalty = 0;
+    colorType oppColor = (color == RED) ? BLACK : RED;
+    
+    // 获取我方将帅的位置 (假设坐标系RED阵营底线y=9, BLACK底线y=0)
+    int kingY = (color == RED) ? 9 : 0;
+    int centerM_Y = (color == RED) ? 8 : 1; // 所谓窝心马的位置必定在九宫中心点
+    
+    int kingPos = board->xy2pos(4, kingY);
+    if (target[kingPos].type != King || target[kingPos].color != color) {
+        return 0; // 帅不在初始位置，不套用固定阵型惩罚
+    }
+
+    AdvisorShapeType nShape = SHAPE_NONE;
+    int centerAdvPos = board->xy2pos(4, centerM_Y);
+
+    // 简化判断：如果(4, centerM_Y)没有我方的士，说明中门大开
+    if (target[centerAdvPos].type != Assistant || target[centerAdvPos].color != color) {
+        nShape = SHAPE_CENTER;
+    }
+
+    if (nShape == SHAPE_CENTER) {
+        // 遍历中路(x=4)上的敌方炮
+        for (int y = 0; y <= 9; y++) {
+            int pos = board->xy2pos(4, y);
+            if (target[pos].type == Cannon && target[pos].color == oppColor) {
+                // 判断此敌方中炮与我方将帅之间的障碍物数量
+                int blockCount = board->betweenNotEmptyNum(4, y, 4, kingY);
+                int dist = abs(y - kingY);
+                
+                if (blockCount == 0) {
+                    // 障碍物为0：说明完全是空头炮，被直照
+                    penalty += HollowThreat[dist]; 
+                } 
+                else if (blockCount == 1) {
+                    // 障碍物为1，检查阻挡物是不是我方的窝心马
+                    int blockPos = board->xy2pos(4, centerM_Y);
+                    if (target[blockPos].type == Knight && target[blockPos].color == color) {
+                        penalty += CentralThreat[dist];
+                    }
+                }
+            }
+        }
+    }
+    
+    return penalty;
+}
+
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
 
     int res = 0;
     res += this->calstaticstate(target,color);
     res += this->caldynamicstate(target,color);
+    
+    // 特殊棋形扣分、静态评估、动态评估
+    colorType oppCol = (color == RED) ? BLACK : RED;
+    int myShapePenalty = this->calShapePenalty(target, color);
+    int oppShapePenalty = this->calShapePenalty(target, oppCol);
+    res = res - myShapePenalty + oppShapePenalty;
+
+    
     return res;
 }
 
@@ -2353,8 +2490,7 @@ int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
 
     auto target_piece = curstate[target_pos].type;
     auto source_piece = curstate[source_pos].type;
-
-    if (target_piece == None) {
+if (target_piece == None) {
         return 0; // 不吃子时的得分
     }
 
@@ -2425,14 +2561,29 @@ void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
     //快速排序 vector<MoveNode> 
     sort(nodes.begin(), nodes.end(), MoveNodecmp);
 }
+void Chess::makeNullMove(){
+    state.push_back(state[currTurnId]);
+    currTurnId ++;
+    continuePeaceTurn.push_back(continuePeaceTurn[currTurnId - 1] + 1);
+    lastMoveEaten.push_back(false);
+    currColor = oppColor();
+}
+void Chess::undoNullMove(){
+    undoMove();
+}
+//错误，以下不是空步，而是“伪装成空步的落子”，未必合法！
+// void ChessAI::MoveNodeVoid(){
+//     Move tmpmove;
+//     //让棋局在此步原地踏步
+//     tmpmove.source_x = 1;
+//     tmpmove.source_y = 1;
+//     tmpmove.target_x = 1;
+//     tmpmove.target_y = 1;
+//     board->makeMoveAssumeLegal(tmpmove);
+// }
+
 void ChessAI::MoveNodeVoid(){
-    Move tmpmove;
-    //让棋局在此步原地踏步
-    tmpmove.source_x = 1;
-    tmpmove.source_y = 1;
-    tmpmove.target_x = 1;
-    tmpmove.target_y = 1;
-    board->makeMoveAssumeLegal(tmpmove);
+    this->board->makeNullMove();
 }
 
 void ChessAI::MoveNodeFront(MoveNode& tmpmove){
@@ -2444,11 +2595,18 @@ void ChessAI::MoveNodeBack(MoveNode& tmpmove){
     this->board->undoMove();
 }
 
+//在搜素树遍历中，管理棋盘状态（落子和取消落子），RAII标准
 struct MoveGuard {
     ChessAI* ai;
     MoveNode& node;
     MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
     ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
+struct NullMoveGuard{
+    ChessAI* ai;
+    NullMoveGuard(ChessAI* a) : ai(a) {ai->board->makeNullMove();}
+    ~NullMoveGuard() {ai->board->undoMove(); }
 };
 
 //该步是否获得胜利
@@ -2462,9 +2620,22 @@ bool ChessAI::getWin(){
     return true;
 }
 
+bool ChessAI::iftmpLose(){
+    if(board == nullptr){
+        throw std::runtime_error("(iftmpLose) board is null");
+    }
+    const vector<Grid>& curstate = board->state[board->currTurnId];
+
+    for(const auto& grid : curstate){
+        if(grid.color == board->currColor && grid.type == King){
+            return false;
+        }
+    }
+    return true;
+}
 //初始化min max值
-const int minstateval = -9999999;
-const int maxstateval = 9999999;
+const int minstateval = -999999;
+const int maxstateval = 999999;
 //着重考虑selected等全局变量应该如何处理
 void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
     int max_depth = 10;  //最大搜素深度
@@ -2569,9 +2740,10 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
 }
 
 //alpha —— beta 具体搜索函数 将函数入口和函数体相剥离
-
+const int matescore = 1000000; //终局胜负分不能直接等于maxstateval,给alpha-beta
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     searchTime.check();
+
 
     if (depth == 0) { 
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
@@ -2579,17 +2751,19 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
-    if(getWin()){
-        return 999999; 
-    }
+
     const int R = 2; // 深度缩减参数(Reduction)
     if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
         this->MoveNodeVoid(); // 执行空步
 
         // 尝试一个零窗口探测计算空步后的局面价值
-        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
-
-        this->board->undoMove(); // 撤销空步
+        int null_val;
+        //类似于MoveGuard，这里空步仍然需要MoveGuard
+        {
+            NullMoveGuard tmpguard(this);
+            null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+        }
+        this->board->undoNullMove(); // 撤销空步
 
         // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
         if (null_val >= beta) {
@@ -2629,6 +2803,9 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     searchTime.check();
     
+    if(iftmpLose()){
+        return -matescore - depth;
+    }
     //获取当前的Zobrist Key
     uint64_t curkey = this->board->getZobristKey();
     int TT_val;
@@ -2658,7 +2835,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         // 尝试一个零窗口探测计算空步后的局面价值
         int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
 
-        this->board->undoMove(); // 撤销空步
+        this->board->undoNullMove(); // 撤销空步
 
         // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
         if (null_val >= beta) {
@@ -2670,7 +2847,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     board->generateMovesWithForbidden(tmpMoves);
     
     // （如有死局则返回极小的评估值，代表被将死）
-    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+    if (tmpMoves.empty()) return -matescore - depth; // 越早被将死，分数越低 100为“偏移系数”
 
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
@@ -2854,10 +3031,116 @@ bool ChessAI::haveattack_of_valuestone(vector<Grid>& tmp,colorType color){
 
 //是否为“白手”
 
+//错误写法：
+
+/*
 bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
     MoveNodeFront(tmpmove);
+    
     this->evaluator.getGridcontrol();
     return havethreat(board->state[board->currTurnId],board->currColor);
+}
+*/
+
+//这里移动一步没有回撤！
+
+bool ChessAI::isQuietMove(vector<Grid>& tmpgrid, MoveNode& tmpmove)
+{
+    if (board == nullptr) {
+        throw std::runtime_error("(isQuietMove) board is null");
+    }
+
+    const Move& move = tmpmove.strategy;
+
+    // 1. 基本坐标安全检查
+    if (!Chess::inBoard(move.source_x, move.source_y) ||
+        !Chess::inBoard(move.target_x, move.target_y)) {
+        return false; // 非法走法不能当作安静着法
+    }
+
+    int sourcePos = board->xy2pos(move.source_x, move.source_y);
+    int targetPos = board->xy2pos(move.target_x, move.target_y);
+
+    if (sourcePos < 0 || sourcePos >= 90 || targetPos < 0 || targetPos >= 90) {
+        return false;
+    }
+
+    if (tmpgrid.size() != 90) {
+        throw std::runtime_error("(isQuietMove) invalid board state size");
+    }
+
+    const Grid& sourceGrid = tmpgrid[sourcePos];
+    const Grid& targetGrid = tmpgrid[targetPos];
+
+    // 2. 源格必须是当前行动方棋子，否则不能认为是正常安静步
+    if (sourceGrid.color != board->currColor || sourceGrid.type == None) {
+        return false;
+    }
+
+    // 3. 吃子着法不是安静着法
+    bool isCapture = (targetGrid.color != EMPTY && targetGrid.color != sourceGrid.color);
+    if (isCapture) {
+        return false;
+    }
+
+    // 4. 用 MoveGuard 临时执行该步，作用域结束自动回撤
+    bool givesCheck = false;
+    bool createsValuableThreat = false;
+
+    {
+        MoveGuard guard(this, tmpmove);
+
+        // 执行 tmpmove 后，board->currColor 已经切换为对手颜色。
+        // 因此此时 currColor 表示“被走完这步后轮到行动的一方”，也就是对手。
+        colorType opponentAfterMove = board->currColor;
+        colorType moverColor = board->oppColor();
+
+        // 4.1 判断是否将军：查找对手将帅是否被刚刚行动的一方攻击
+        int oppKingX = -1;
+        int oppKingY = -1;
+
+        for (int x = 0; x < BOARDWIDTH; ++x) {
+            for (int y = 0; y < BOARDHEIGHT; ++y) {
+                const Grid& g = board->state[board->currTurnId][board->xy2pos(x, y)];
+                if (g.color == opponentAfterMove && g.type == King) {
+                    oppKingX = x;
+                    oppKingY = y;
+                    break;
+                }
+            }
+            if (oppKingX != -1) {
+                break;
+            }
+        }
+
+        // 如果对方将帅不存在，说明这是终局/异常战术局面，绝不应当视为安静着法
+        if (oppKingX == -1) {
+            return false;
+        }
+
+        givesCheck = board->attacked(moverColor, oppKingX, oppKingY);
+        if (givesCheck) {
+            return false;
+        }
+
+        // 4.2 判断是否制造了对方重要棋子的威胁。
+        // 注意：执行走子后，board->currColor 是对手。
+        // havethreat_of_valuestone(state, opponentAfterMove)
+        // 含义是：对手的重要棋子是否被当前刚走棋的一方攻击。
+        createsValuableThreat =
+            this->havethreat_of_valuestone(
+                board->state[board->currTurnId],
+                opponentAfterMove
+            );
+
+        if (createsValuableThreat) {
+            return false;
+        }
+    }
+
+    // 走到这里时，MoveGuard 已经自动 undoMove()，棋盘状态恢复。
+    // 非吃子、非将军、非捉重要子，才认为是安静着法。
+    return true;
 }
 
 int ChessAI::quiescence_search(int alpha, int beta) {
@@ -2946,6 +3229,67 @@ int ChessAI::quiescence_search(int alpha, int beta) {
 
     return alpha;
 }
+
+
+bool getchessbook(Chess& chess,Move& bookMove){
+    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
+    if(!fin.is_open()){
+        return false;
+    }
+
+    Json::Value book;
+    Json::Reader reader;
+    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
+        return false;            //Json解析失败
+    }
+
+    uint64_t tmpkey = chess.getZobristKey();
+    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
+    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
+        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
+    }
+
+    Json::Value &moves = book[keyStr];
+    // //选择count最大的走法
+    // int bestIdx = 0;
+    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
+
+    // for(int i = 1;i < moves.size();i ++){
+    //     int c = moves[i].get("count",0).asInt();
+    //     if(c > bestCount){
+    //         bestCount = c;
+    //         bestIdx = i;
+    //     }
+    // }
+
+    //在出现频次最高的 Move中随机挑选
+    int selectIdx = 0;
+    vector<int> selectIdxes;           //待选择的多个Move的索引
+    selectIdxes.push_back(selectIdx);  //先加入第一个
+    for(int i = 1;i < moves.size();i ++){
+        int c = moves[i].get("count",0).asInt();
+        if(c > selectIdxes[0]){        
+            selectIdxes.clear();
+        }
+        selectIdxes.push_back(i);
+    }
+
+    srand(time(0));
+    selectIdx = selectIdxes[rand() % selectIdxes.size()];
+
+    const Json::Value &m = moves[selectIdx]["move"];
+
+    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
+
+    //必须再验证合法性
+    if(!chess.isMoveValidWithForbidden(res)){
+        return false;
+    }
+
+    bookMove = res;
+    return true;
+}
+
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
 //吃子的估值

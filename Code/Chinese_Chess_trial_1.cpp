@@ -353,7 +353,11 @@ public:
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
 
     
-    EvalRecord() : board(nullptr), isKingattacked(false) {}
+    EvalRecord() : board(nullptr), isKingattacked(false) 
+    {
+        memset(GridControl, 0, sizeof(GridControl));
+        memset(havecontrol, 0, sizeof(havecontrol));
+    }
 };
 
 const int max_depth = 64;       //最大搜素深度
@@ -1833,8 +1837,9 @@ void EvalRecord::getGridcontrol(){
                     }
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
                     //这里不使用color传参，使用board中的currColor
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 //将帅照面：King沿竖线遇到对方King时，同样计为可控制
@@ -1868,8 +1873,9 @@ void EvalRecord::getGridcontrol(){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
                     
                     //填充havecontrol
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 break;
@@ -1889,8 +1895,9 @@ void EvalRecord::getGridcontrol(){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
 
                     //填充havecontrol
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 break;
@@ -1910,8 +1917,9 @@ void EvalRecord::getGridcontrol(){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
 
 
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 break;
@@ -1922,8 +1930,9 @@ void EvalRecord::getGridcontrol(){
                     int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
                     while(board->inBoard(tx, ty)){
                         GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                            this->havecontrol[board->xy2pos(x,y)] = true;
+                        auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                            this->havecontrol[board->xy2pos(x, y)] = true;
                         }
                         auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
                         if(tGrid.color != EMPTY){
@@ -1951,8 +1960,9 @@ void EvalRecord::getGridcontrol(){
                         }else{
                             if(tGrid.color != EMPTY){
                                 GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                            if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                                this->havecontrol[board->xy2pos(x,y)] = true;
+                            auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                            if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                                this->havecontrol[board->xy2pos(x, y)] = true;
                             }
                                 break;
                             }
@@ -1969,8 +1979,9 @@ void EvalRecord::getGridcontrol(){
                 int tx = x, ty = y + forwardOne;
                 if(board->inBoard(tx, ty)){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
@@ -1980,9 +1991,11 @@ void EvalRecord::getGridcontrol(){
                         if(board->inBoard(tx, ty)){
                             GridControl[colorId][board->xy2pos(tx, ty)] ++;
                         }
-                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                            this->havecontrol[board->xy2pos(x,y)] = true; //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
-                        }
+                        auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                            this->havecontrol[board->xy2pos(x, y)] = true;
+                        } //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
+                        
                     }
                 }
                 break;
