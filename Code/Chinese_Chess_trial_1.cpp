@@ -403,6 +403,7 @@ public:
     int calstaticstate(vector<Grid> &target, colorType color);                 //根据当前局面(Grid)，得到当前静态局面评分
     int caldynamicstate(vector<Grid> &target, colorType color);                //根据当前局面(Grid), 得到当前动态局面评分
     int calstate(vector<Grid>& target,colorType color);                        //计算出当前局面的总得分
+    int calShapePenalty(vector<Grid>& target, colorType color);                //计算空头炮或窝心马等特殊阵型罚分
     void getGridcontrol();                                                     //填充控制点字典，为了保证效率，一次遍历，进行多种"特征选择"，收集多种数据。(虽然会破坏耦合性)
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
 
@@ -2460,12 +2461,80 @@ const int mydynamicweight = 1;
 const int oppstaticweight = 1;
 const int oppdynamicweight = 1;
 
+//空头炮和窝心马的惩罚分数数组(随敌方炮距我方底线的纵深改变)
+static const int HollowThreat[10] = { 80, 80, 80, 70, 60, 50, 40, 30, 20, 10 };
+static const int CentralThreat[10] = { 100, 100, 90, 80, 70, 60, 50, 40, 30, 20 };
+
+enum AdvisorShapeType {
+    SHAPE_NONE = 0,
+    SHAPE_CENTER = 1, // 中路空虚
+    SHAPE_LEFT = 2,
+    SHAPE_RIGHT = 3
+};
+
+// 计算特殊阵型（空头炮、窝心马）判定造成的罚分，罚分值越大说明阵型越糟糕
+int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
+    int penalty = 0;
+    colorType oppColor = (color == RED) ? BLACK : RED;
+    
+    // 获取我方将帅的位置 (假设坐标系RED阵营底线y=9, BLACK底线y=0)
+    int kingY = (color == RED) ? 9 : 0;
+    int centerM_Y = (color == RED) ? 8 : 1; // 所谓窝心马的位置必定在九宫中心点
+    
+    int kingPos = board->xy2pos(4, kingY);
+    if (target[kingPos].type != King || target[kingPos].color != color) {
+        return 0; // 帅不在初始位置，不套用固定阵型惩罚
+    }
+
+    AdvisorShapeType nShape = SHAPE_NONE;
+    int centerAdvPos = board->xy2pos(4, centerM_Y);
+
+    // 简化判断：如果(4, centerM_Y)没有我方的士，说明中门大开
+    if (target[centerAdvPos].type != Assistant || target[centerAdvPos].color != color) {
+        nShape = SHAPE_CENTER;
+    }
+
+    if (nShape == SHAPE_CENTER) {
+        // 遍历中路(x=4)上的敌方炮
+        for (int y = 0; y <= 9; y++) {
+            int pos = board->xy2pos(4, y);
+            if (target[pos].type == Cannon && target[pos].color == oppColor) {
+                // 判断此敌方中炮与我方将帅之间的障碍物数量
+                int blockCount = board->betweenNotEmptyNum(4, y, 4, kingY);
+                int dist = abs(y - kingY);
+                
+                if (blockCount == 0) {
+                    // 障碍物为0：说明完全是空头炮，被直照
+                    penalty += HollowThreat[dist]; 
+                } 
+                else if (blockCount == 1) {
+                    // 障碍物为1，检查阻挡物是不是我方的窝心马
+                    int blockPos = board->xy2pos(4, centerM_Y);
+                    if (target[blockPos].type == Knight && target[blockPos].color == color) {
+                        penalty += CentralThreat[dist];
+                    }
+                }
+            }
+        }
+    }
+    
+    return penalty;
+}
+
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
 
     int res = 0;
     res += this->calstaticstate(target,color);
     res += this->caldynamicstate(target,color);
+    
+    // ----------- 追加特殊棋形扣分 -----------
+    colorType oppCol = (color == RED) ? BLACK : RED;
+    int myShapePenalty = this->calShapePenalty(target, color);
+    int oppShapePenalty = this->calShapePenalty(target, oppCol);
+    res = res - myShapePenalty + oppShapePenalty;
+    // ------------------------------------
+    
     return res;
 }
 
