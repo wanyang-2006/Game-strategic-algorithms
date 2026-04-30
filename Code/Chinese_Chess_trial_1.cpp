@@ -376,6 +376,7 @@ public:
     Move killerMoves[max_depth][2];                            //杀手着法表，假设最大搜素深度为Max_Search_Depth 每层杀手着法数目设为2
     // ChessAI方法                                      
     bool getWin();                                                            //更新isWin,判断是否胜利
+    bool iftmpLose();                                                         //当前走棋的一方是否没有将/帅
     void getcurstones(void);
     void generateMovesWithForbidden();                                        //对应board的同名方法
     void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
@@ -2619,9 +2620,22 @@ bool ChessAI::getWin(){
     return true;
 }
 
+bool ChessAI::iftmpLose(){
+    if(board == nullptr){
+        throw std::runtime_error("(iftmpLose) board is null");
+    }
+    const vector<Grid>& curstate = board->state[board->currTurnId];
+
+    for(const auto& grid : curstate){
+        if(grid.color == board->currColor && grid.type == King){
+            return false;
+        }
+    }
+    return true;
+}
 //初始化min max值
-const int minstateval = -9999999;
-const int maxstateval = 9999999;
+const int minstateval = -999999;
+const int maxstateval = 999999;
 //着重考虑selected等全局变量应该如何处理
 void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
     int max_depth = 10;  //最大搜素深度
@@ -2726,9 +2740,10 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
 }
 
 //alpha —— beta 具体搜索函数 将函数入口和函数体相剥离
-
+const int matescore = 1000000; //终局胜负分不能直接等于maxstateval,给alpha-beta
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     searchTime.check();
+
 
     if (depth == 0) { 
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
@@ -2736,9 +2751,7 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
-    if(getWin()){
-        return 999999; 
-    }
+
     const int R = 2; // 深度缩减参数(Reduction)
     if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
         this->MoveNodeVoid(); // 执行空步
@@ -2790,6 +2803,9 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     searchTime.check();
     
+    if(iftmpLose()){
+        return -matescore - depth;
+    }
     //获取当前的Zobrist Key
     uint64_t curkey = this->board->getZobristKey();
     int TT_val;
@@ -2831,7 +2847,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     board->generateMovesWithForbidden(tmpMoves);
     
     // （如有死局则返回极小的评估值，代表被将死）
-    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+    if (tmpMoves.empty()) return -matescore - depth; // 越早被将死，分数越低 100为“偏移系数”
 
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);
