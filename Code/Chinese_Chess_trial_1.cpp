@@ -411,6 +411,8 @@ public:
 
     ChessAI();                        //(隐式)实例化新对象
     explicit ChessAI(Chess *board);   //(显式)实例化新对象
+    ChessAI(const ChessAI&) = delete; //不允许拷贝构造，防止出现两个对象都认为自己有同一个Chess*
+    ChessAI& operator=(const ChessAI&) = delete;
     ~ChessAI();
 };
 void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
@@ -1197,6 +1199,12 @@ bool Chess::isMyKingAttackedAfterMove(const Move &move)
             }
         }
     }
+    if (kingX == -1)
+    {
+        undoMove();
+        assert(currColor == originColor);
+        return true;
+    }
     bool myKingStillAttacked = attacked(oppColor(originColor), kingX, kingY);
     undoMove();
     assert(currColor == originColor);
@@ -1212,7 +1220,10 @@ bool Chess::isMoveValid(const Move &move, bool mustDefend)
 // 评估某步移动之后是否能造成对方无路可走(获胜)的函数定义
 bool Chess::winAfterMove(const Move &move)
 {
-    makeMoveAssumeLegal(move);
+    if (!makeMoveAssumeLegal(move))
+    {
+        return false;
+    }
     vector<Move> oppLegalMoves;
     generateMoves(oppLegalMoves);
     undoMove();
@@ -1242,7 +1253,10 @@ bool Chess::currKingAttacked(const Move &move)
 bool Chess::isOppKingAttackedAfterMove(const Move &move)
 {
     colorType originColor = currColor;
-    makeMoveAssumeLegal(move);
+    if (!makeMoveAssumeLegal(move))
+    {
+        return false;
+    }
     int kingX = -1, kingY = -1;
     for (int x = 0; x < BOARDWIDTH; x++)
     {
@@ -1256,6 +1270,12 @@ bool Chess::isOppKingAttackedAfterMove(const Move &move)
                 break;
             }
         }
+    }
+    if (kingX == -1)
+    {
+        undoMove();
+        assert(currColor == originColor);
+        return true;
     }
     bool oppKingBeingAttacked = attacked(originColor, kingX, kingY);
     undoMove();
@@ -1375,7 +1395,10 @@ void Chess::generateMovesWithForbidden(vector<Move> &legalMoves, bool mustDefend
 // 评估某步移动后是否会导致达到三次重复局面的函数定义
 bool Chess::repeatAfterMove(const Move &move)
 {
-    makeMoveAssumeLegal(move);
+    if (!makeMoveAssumeLegal(move))
+    {
+        return false;
+    }
     int tmp_id = currTurnId;
     if (lastMoveEaten[tmp_id])
     {
@@ -2690,7 +2713,10 @@ void ChessAI::MoveNodeVoid(){
 
 void ChessAI::MoveNodeFront(MoveNode& tmpmove){
     // 直接下棋即可，因为在alpha-beta搜索进来的着法肯定是合法的(由generateMovesWithForbidden得到)
-    board->makeMoveAssumeLegal(tmpmove.strategy);
+    if (!board->makeMoveAssumeLegal(tmpmove.strategy))
+    {
+        throw std::runtime_error("(MoveNodeFront) illegal move");
+    }
 }
 // 对应撤销走法
 void ChessAI::MoveNodeBack(MoveNode& tmpmove){
