@@ -118,10 +118,10 @@ namespace Tuning {
     inline int getMVVLVAScore(stoneType attacker, stoneType victim, bool isProtected) {
         if (victim == None) {
             return 0;
-        }//MVV/LAA
-
-        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] :0;
-        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - Tuning::AttackerValue[attacker];
+        }
+        // attackerPenalty 被保护时减去攻击者价值
+        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] : 0;
+        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - attackerPenalty;
     }
 }
 
@@ -3398,13 +3398,17 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid, MoveNode& tmpmove)
 int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
     searchTime.check();
 
+    // 深度保护
     if (mdepth <= 0) {
         return evaluator.calstate(board->state[board->currTurnId], board->currColor);
     }
     
     int kingX = -1, kingY = -1;
+    int startY = (board->currColor == RED) ? 0 : 7;
+    int endY   = (board->currColor == RED) ? 2 : 9;//扫描九宫格内
+    
     for (int x = 3; x <= 5; x++) { 
-        for (int y = 0; y <= 9; y++) {
+        for (int y = startY; y <= endY; y++) {
             auto& grid = board->state[board->currTurnId][board->xy2pos(x, y)];
             if (grid.color == board->currColor && grid.type == King) {
                 kingX = x; 
@@ -3415,7 +3419,10 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
         if (kingX != -1) break;
     }
     
-    bool inCheck = board->attacked(board->oppColor(), kingX, kingY);
+    bool inCheck = false;
+    if (kingX != -1) {
+        inCheck = board->attacked(board->oppColor(), kingX, kingY);
+    }
 
     if (!inCheck) {
         int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);
@@ -3429,55 +3436,79 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
 
     vector<Move> tmpMoves;
     board->generateMovesWithForbidden(tmpMoves);
+    
     if (inCheck && tmpMoves.empty()) {
         return minstateval + 1000; 
     }
 
-    vector<MoveNode> nextNodes;
+    constexpr int MAX_QS_MOVES = 128; // 静态搜索合法步 预分配128
+    MoveNode qsNodes[MAX_QS_MOVES];
+    int qsCount = 0;
+    
     auto& currState = board->state[board->currTurnId];
     
     for (const auto& m : tmpMoves) {
+        if (qsCount >= MAX_QS_MOVES) break; // 数组越界保护
+
         int targetPos = board->xy2pos(m.target_x, m.target_y);
         int sourcePos = board->xy2pos(m.source_x, m.source_y);
     
         stoneType victim = currState[targetPos].type;
         stoneType attacker = currState[sourcePos].type;
+        
+        // 只有被将军或者是吃子着法才进入静态搜索
         if (inCheck || victim != None) {
             MoveNode node;
             node.strategy = m;
-            if(victim!=None)
-            {
-                bool isProtected = board->isattacked(board->oppColor(), m.target_x,m.target_y);
             
-                if(!inCheck && isProtected&& Tuning::VictimValue[victim]<Tuning::AttackerValue[attacker])
-                {
-                    if(Tuning::VictimValue[victim]<3)
-                    {
-                    continue;
+            if(victim != None) {
+                bool isProtected = board->isattacked(board->oppColor(), m.target_x, m.target_y);
+            
+                // 不良吃子剪枝
+                if(!inCheck && isProtected && Tuning::VictimValue[victim] < Tuning::AttackerValue[attacker]) {
+                    if(Tuning::VictimValue[victim] < 3) {
+                        continue;
                     }
                 }
             
-                int mvvlva = Tuning::getMVVLVAScore(attacker,victim,isProtected);
-                node.value=mvvlva+10000;
-            }else{
-                node.value=0;
+                int mvvlva = Tuning::getMVVLVAScore(attacker, victim, isProtected);
+                node.value = mvvlva + 10000;
+            } else {
+                node.value = 0;
             }
-            nextNodes.push_back(node);
             
+            qsNodes[qsCount++] = node;
         }
     }
 
-    // 降序排序
-    this->MoveNodesort(nextNodes);
-    for (auto& node : nextNodes) {
+    // 延迟选择排序，不使用 this->MoveNodesort()
+    // 全局 sort 浪费了大量的比较操作。
+    for (int i = 0; i < qsCount; ++i) {
+        // 在 [i, qsCount - 1] 范围内寻找最高分的节点，并与 i 交换
+        int bestIdx = i;
+        int bestVal = qsNodes[i].value;
+        for (int j = i + 1; j < qsCount; ++j) {
+            if (qsNodes[j].value > bestVal) {
+                bestVal = qsNodes[j].value;
+                bestIdx = j;
+            }
+        }
+        if (bestIdx != i) {
+            std::swap(qsNodes[i], qsNodes[bestIdx]);
+        }
+
         int val;
         {
-            MoveGuard guard(this, node);
-            val = -quiescence_search(-beta, -alpha, mdepth-1); 
+            MoveGuard guard(this, qsNodes[i]);
+            // 静态搜索，传 mdepth-1 防止深度过深崩溃
+            val = -quiescence_search(-beta, -alpha, mdepth - 1); 
         }
+        
+        // Beta 剪枝
         if (val >= beta) {
             return beta;
         }
+        // Alpha 更新
         if (val > alpha) {
             alpha = val;
         }
