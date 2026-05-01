@@ -404,7 +404,7 @@ public:
     bool haveattack_of_valuestone(vector<Grid>& tmpstate,colorType color);    //我方重要的棋子————"将/帅"、车马炮
     bool isQuietMove(vector<Grid>& tmpstate,MoveNode& tmpmove);               //我方的该步，是否为"白手" ———— 我方无吃子机会也无威胁，用于剪枝大量无意义着法
 
-    int quiescence_search(int alpha, int beta) ;                     //静态搜索，解决水平线效应
+    int quiescence_search(int alpha, int beta, int mdepth=15) ;                     //静态搜索，解决水平线效应
 
     ChessAI();                        //(隐式)实例化新对象
     explicit ChessAI(Chess *board);   //(显式)实例化新对象
@@ -3169,9 +3169,13 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid, MoveNode& tmpmove)
     return true;
 }
 
-int ChessAI::quiescence_search(int alpha, int beta) {
+int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
     searchTime.check();
 
+    if (mdepth <= 0) {
+        return evaluator.calstate(board->state[board->currTurnId], board->currColor);
+    }
+    
     int kingX = -1, kingY = -1;
     for (int x = 3; x <= 5; x++) { 
         for (int y = 0; y <= 9; y++) {
@@ -3243,7 +3247,7 @@ int ChessAI::quiescence_search(int alpha, int beta) {
         int val;
         {
             MoveGuard guard(this, node);
-            val = -quiescence_search(-beta, -alpha); 
+            val = -quiescence_search(-beta, -alpha, mdepth-1); 
         }
         if (val >= beta) {
             return beta;
