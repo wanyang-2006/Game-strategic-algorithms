@@ -2286,6 +2286,7 @@ namespace Evalpara{
     }
 }
 
+
 //填充Gridcontrol 格点控制表
 void EvalRecord::getGridcontrol(){
     if(board == nullptr){
