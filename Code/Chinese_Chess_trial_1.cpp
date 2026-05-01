@@ -1465,8 +1465,11 @@ bool Chess::isattacked(colorType color, int mx, int my)
             case King:
             {
                 // King不能超出九宫格  我方是否在对方 将/帅 的九宫格内？
-                if ((abs(dex) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))) || (abs(dex) == 0 && abs(dey) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))))
-                {
+                // if ((abs(dex) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))) || (abs(dex) == 0 && abs(dey) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))))
+                // {
+                //     return true;
+                // }
+                if (abs(dex) + abs(dey) == 1 && inKingArea(mx, my, color)) {
                     return true;
                 }
                 break;
