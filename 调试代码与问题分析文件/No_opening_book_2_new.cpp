@@ -179,7 +179,7 @@ private:
     unsigned int checkerCount; // 改为无符号整型
 
 public:
-    SearchTime(int limit_ms = 600) : timeLimit_ms(limit_ms), checkerCount(0) {}
+    SearchTime(int limit_ms =800) : timeLimit_ms(limit_ms), checkerCount(0) {}
 
     void setLimitMs(int limit_ms)
     {
@@ -1915,14 +1915,14 @@ void ChessAI::getdiffmoves()
     }
 }
 
-ChessAI::ChessAI(): board(new Chess()),ownBoard(true),searchTime(600){
+ChessAI::ChessAI(): board(new Chess()),ownBoard(true),searchTime(800){
     //evaluator.copyBoard(board);
     evaluator.bindBoard(*board);
     evaluator.isKingattacked = false;
 
 }
 
-ChessAI::ChessAI(Chess* otherboard) : board(otherboard),ownBoard(false),searchTime(600){
+ChessAI::ChessAI(Chess* otherboard) : board(otherboard),ownBoard(false),searchTime(800){
     if(board == nullptr){
         throw std::runtime_error("Chess external obj is nullptr");
     }
@@ -3029,7 +3029,7 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 }
 
 void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
-    int max_depth = 10;
+    int max_depth = 30;
     int alpha = minstateval;
     int beta = maxstateval;
     
