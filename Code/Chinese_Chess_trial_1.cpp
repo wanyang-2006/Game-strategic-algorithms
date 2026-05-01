@@ -957,6 +957,46 @@ bool Chess::isLegalMove(const Move &move, bool mustDefend)
 // 在假设移动合法的前提下执行该移动，更新棋盘状态的函数定义
 bool Chess::makeMoveAssumeLegal(const Move &move)
 {
+    // 先做最基本的防御检查，避免非法坐标先进入xy2pos造成越界访问
+    // 对当前局面进行合法性检查，保证当前局面合法
+    if (!inBoard(move.source_x, move.source_y) || !inBoard(move.target_x, move.target_y))
+    {
+        return false;
+    }
+    if (state.empty() || currTurnId < 0 || currTurnId >= state.size())
+    {
+        return false;
+    }
+    if (continuePeaceTurn.empty() || currTurnId >= continuePeaceTurn.size())
+    {
+        return false;
+    }
+
+    //接下来保证着棋本身合法
+    int sourcePos = xy2pos(move.source_x, move.source_y);
+    int targetPos = xy2pos(move.target_x, move.target_y);
+    if (sourcePos < 0 || sourcePos >= 90 || targetPos < 0 || targetPos >= 90)
+    {
+        return false;
+    }
+    if (state[currTurnId].size() != 90)
+    {
+        return false;
+    }
+
+    const Grid &sourceGridBefore = state[currTurnId][sourcePos];
+    const Grid &targetGridBefore = state[currTurnId][targetPos];
+
+    // 源格必须是当前行动方棋子，目标格不能是当前行动方自己的棋子
+    if (sourceGridBefore.color != currColor || sourceGridBefore.type == None)
+    {
+        return false;
+    }
+    if (targetGridBefore.color == currColor)
+    {
+        return false;
+    }
+
     int nextPeaceTrun = continuePeaceTurn[currTurnId] + 1;
     vector<Grid> copyState = state[currTurnId];
     state.push_back(copyState);
@@ -1139,7 +1179,10 @@ bool Chess::inSameObiqueLine(int sx, int sy, int ex, int ey)
 bool Chess::isMyKingAttackedAfterMove(const Move &move)
 {
     colorType originColor = currColor;
-    makeMoveAssumeLegal(move);
+    if(!makeMoveAssumeLegal(move)){
+        return true;
+    }
+    //makeMoveAssumeLegal(move); 原逻辑 ：根据假设的着棋走一步，只要执行完毕，就修改相应棋盘状态，最终就返回true
     int kingX = -1, kingY = -1;
     for (int x = 0; x < BOARDWIDTH; x++)
     {
