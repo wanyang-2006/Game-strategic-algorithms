@@ -2141,7 +2141,7 @@ namespace Evalpara{
     };
 
     // 将帅安全表：强烈鼓励原位，中宫上移显著扣分，解决无威胁乱动帅/将的问题。
-    static const int KingSafePST[90] = {
+    static const int KingSafePTable[90] = {
         0,0,0,-120,-110,-120,0,0,0,
         0,0,0,-110,-100,-110,0,0,0,
         0,0,0,-100, -90,-100,0,0,0,
@@ -2155,7 +2155,7 @@ namespace Evalpara{
     };
 
     //士位置表
-    static const int AdvisorPST[90] = {
+    static const int AdvisorPTable[90] = {
         0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,
@@ -2169,7 +2169,7 @@ namespace Evalpara{
     };
 
     //相位置表
-    static const int BishopPST[90] = {
+    static const int BishopPTable[90] = {
         0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,
         0,0,0,0,0,0,0,0,0,
@@ -2183,7 +2183,7 @@ namespace Evalpara{
     };
 
     // 兵卒中局表：row 9 是己方底线，row 0 是对方底线；越接近对方九宫价值越高。
-    static const int PawnMidPST[90] = {
+    static const int PawnMidPTable[90] = {
         75, 80, 85, 95,110, 95, 85, 80, 75,
         68, 72, 78, 88,100, 88, 78, 72, 68,
         58, 62, 68, 76, 86, 76, 68, 62, 58,
@@ -2197,7 +2197,7 @@ namespace Evalpara{
     };
 
     //兵卒残局位置表
-    static const int PawnEndPST[90] = {
+    static const int PawnEndPTable[90] = {
         95,100,105,115,130,115,105,100, 95,
         86, 90, 96,106,120,106, 96, 90, 86,
         72, 76, 82, 92,104, 92, 82, 76, 72,
@@ -2210,17 +2210,17 @@ namespace Evalpara{
          0,  0,  0,  0,  0,  0,  0,  0,  0
     };
 
-    //计算棋子位置修正分，简单逻辑：位置分为几十点，大子为棋子存活分段 一半
+    //计算棋子位置修正分，简单逻辑：位置分为几十点，大子为棋子存活分段 一半以下
     inline int normalizedPieceSquare(stoneType type, int posIndex, int weightMid, bool hasCaptureChance) {
         switch (type) {
         case King:
-            return KingSafePST[posIndex];
+            return KingSafePTable[posIndex];
         case Assistant:
-            return AdvisorPST[posIndex];
+            return AdvisorPTable[posIndex];
         case Bishop:
-            return BishopPST[posIndex];
+            return BishopPTable[posIndex];
         case Pawn: {
-            int v = interp(PawnMidPST[posIndex], PawnEndPST[posIndex], weightMid);
+            int v = interp(PawnMidPTable[posIndex], PawnEndPTable[posIndex], weightMid);
             if (hasCaptureChance) v += 18;
             return v;
         }
@@ -2491,7 +2491,7 @@ void EvalRecord::getGridcontrol(){
                     }
                 }
                 break;
-            }
+                }
             }
         }
     }
@@ -2575,87 +2575,25 @@ int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
     for (int y = 9; y >= 0; y--) {
         for (int x = 0; x <= 8; x++) {
             auto& curGrid = target[board->xy2pos(x, y)];
-            if (curGrid.type == None || curGrid.color == EMPTY) continue;
-            
-            // 静态棋力表是以红方视角建立，所以如果是黑方需要翻转纵坐标
-            int viewY = (curGrid.color == RED) ? y : (9 - y);
-            int posIndex = 9 * viewY + x;
+            int pos = board->xy2pos(x,y);
+            const Grid& curGrid = target[pos];
+            if(curGrid.type == None || curGrid.color == EMPTY){
+                continue;
+            }
 
-            if (curGrid.color == color) { // 计算我方加分
-                int midValue = 0;
-                int endValue = 0;
-
-                switch (curGrid.type) {
-                case Pawn:
-                case King: {
-                    bool flag = this->hasattackchance(x, y);
-                    midValue = flag ? mid_KingPawn_attack[posIndex] : mid_KingPawn_no_attack[posIndex];
-                    endValue = flag ? end_KingPawn_attack[posIndex] : end_KingPawn_no_attack[posIndex];
-                    // 只有将帅/兵卒有明显的中残局阶段变化
-                    res += (midValue * weightMid + endValue * weightEnd) / Total_state;
-                    break;
-                }
-                case Assistant:
-                case Bishop: {
-                    bool flag = this->isattackedBy(oppCol, x, y);
-                    // 仕相受威胁分通常不受残/中局影响或者直接取中局表
-                    res += flag ? mid_AdvBis_Threat[posIndex] : mid_AdvBis_no_Threat[posIndex];
-                    break;
-                }
-                case Knight:
-                    res += (mid_horse[posIndex] * weightMid + end_horse[posIndex] * weightEnd) / Total_state;
-                    break;
-                case Rook:
-                    res += (mid_Rook[posIndex] * weightMid + end_Rook[posIndex] * weightEnd) / Total_state;
-                    break;
-                case Cannon:
-                    res += (mid_Cannon[posIndex] * weightMid + end_Cannon[posIndex] * weightEnd) / Total_state;
-                    break;
-                default:
-                    break;
-                }
-            } 
-            else { // 计算敌方减分
-                // 与上方逻辑同样修改处理，使用：
-                // res -= (midValue * weightMid + endValue * weightEnd) / Total_state;
-                // ...
-                int midValue = 0;
-                int endValue = 0;
-
-                switch (curGrid.type) {
-                case Pawn:
-                case King: {
-                    bool flag = this->hasattackchance(x, y);
-                    midValue = flag ? mid_KingPawn_attack[posIndex] : mid_KingPawn_no_attack[posIndex];
-                    endValue = flag ? end_KingPawn_attack[posIndex] : end_KingPawn_no_attack[posIndex];
-                    // 只有将帅/兵卒有明显的中残局阶段变化
-                    res -= (midValue * weightMid + endValue * weightEnd) / Total_state;
-                    break;
-                }
-                case Assistant:
-                case Bishop: {
-                    bool flag = this->isattackedBy(oppCol, x, y);
-                    // 仕相受威胁分通常不受残/中局影响或者直接取中局表
-                    res -= flag ? mid_AdvBis_Threat[posIndex] : mid_AdvBis_no_Threat[posIndex];
-                    break;
-                }
-                case Knight:
-                    res -= (mid_horse[posIndex] * weightMid + end_horse[posIndex] * weightEnd) / Total_state;
-                    break;
-                case Rook:
-                    res -= (mid_Rook[posIndex] * weightMid + end_Rook[posIndex] * weightEnd) / Total_state;
-                    break;
-                case Cannon:
-                    res -= (mid_Cannon[posIndex] * weightMid + end_Cannon[posIndex] * weightEnd) / Total_state;
-                    break;
-                default:
-                    break;
-                }
+            int posIndex = Evalpara::relIndex(x,y,curGrid.color);
+            bool canCaptureNow = havecontrol[pos];
+            int pieceValue = Evalpara::staticPieceValue(curGrid.type,posIndex,weightMid,canCaptureNow);
+            if(curGrid.color == color){
+                res += pieceValue;
+            }else{
+                res -= pieceValue;
             }
         }
     }
     return res;
 }
+
 //     //计算当前局面的中局权重
 //     int weightMid = getMidgameWeight(vec);
 //     int weightEnd = Total_state - weightMid;
