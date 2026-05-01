@@ -12,7 +12,6 @@
 #include <utility>
 #include <cstdint>
 #include <random>
-#include "TuningParams.h"  //在botzone中的路径为 ./data/TuningParams.h 即为目标文件
 #include <fstream>
 #include <cstring>
 
@@ -31,6 +30,7 @@ using std::to_string;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度
+
 enum stoneType
 {
     None = 0,
@@ -83,6 +83,46 @@ int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”�
 
 //类似于算法题目中的记忆化搜索 ———— 将先前搜索得到的节点存入置换表
 //初始化Zobrist随机数表和Zobrist 轮次标识
+
+namespace Tuning {
+    // MVV 
+    // 对应 stoneType: None=0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7
+    constexpr int VictimValue[8] = {
+        0,      // None
+        5,  // King 
+        1,    // Bishop 
+        3,   // Knight 
+        4,    // Rook 
+        2,    // Pawn 
+        3,    // Cannon 
+        1     // Assistant 
+    };
+
+    // LVA 
+    constexpr int AttackerValue[8] = {
+        0,      // None
+        5,  // King
+        1,    // Bishop
+        3,    // Knight
+        4,    // Rook
+        2,    // Pawn
+        3,    // Cannon
+        1     // Assistant
+    };
+    
+    // 吃子着法的得分永远高于非吃子着法
+    constexpr int CaptureBaseScore = 100;
+
+    inline int getMVVLVAScore(stoneType attacker, stoneType victim, bool isProtected) {
+        if (victim == None) {
+            return 0;
+        }//MVV/LAA
+
+        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] :0;
+        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - Tuning::AttackerValue[attacker];
+    }
+}
+
 
 //构建开局库
 void InitZobrist(){
