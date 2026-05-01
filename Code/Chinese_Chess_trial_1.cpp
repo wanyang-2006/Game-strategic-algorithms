@@ -321,6 +321,7 @@ public:
 
     bool isattacked(colorType color, int mx, int my);
 
+
     //Zobrist Key计算方法 ———— 添加到Chess类中
     uint64_t getZobristKey();
 
@@ -343,6 +344,7 @@ public:
     vector<bool> curattacked;
     
     bool isattacked(colorType color, int mx, int my);                          //(对方的棋子颜色，我方的棋子位置x y) 某一方方位于mx my点的棋子是否可能被吃
+    bool isattackedBy(colorType attacker,int mx,int my); //mx my是否被attacker颜色攻击，不依赖board->currColor
     bool hasattackchance(int mx,int my);                                       //当前位于x y处的棋子是否有吃子的可能
     bool ismiddlecompostion(vector<Grid>& target);                             //是否为中局 / 残局
     int getMidgameWeight(vector<Grid>& target);                                //计算当前属于中局的权重比(x/T)
@@ -1430,7 +1432,7 @@ bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
 
 void ChessAI::getcurstones()
 {
-    int Color = this->board->currColor;
+    colorType Color = this->board->currColor;
     int tmp = this->board->currTurnId;
     for (int y = 9; y >= 0; y--)
     {
@@ -1439,7 +1441,7 @@ void ChessAI::getcurstones()
             if (board->state[tmp][board->xy2pos(x, y)].color == Color)
             {
                 evaluator.curstones.push_back(board->state[tmp][board->xy2pos(x, y)]); 
-                evaluator.curattacked.push_back(evaluator.isattacked(board->oppColor(), x, y));  
+                evaluator.curattacked.push_back(evaluator.isattacked(board->oppColor(Color), x, y));  
             }
         }
     }
@@ -1578,6 +1580,30 @@ bool EvalRecord::isattacked(colorType color, int mx, int my)
     {
         return board->isattacked(color, mx, my);
     }
+}
+
+//纯攻击查询：坐标(mx,my)上的棋子是否被attacker颜色攻击。
+//评估函数可能按任意 color 评估局面，不能把“攻击方颜色”绑定到当前行动方。
+bool EvalRecord::isattackedBy(colorType attacker,int mx,int my){
+    {
+        throw std::runtime_error("(isattackedBy) board is null");
+    }
+    if (!Chess::inBoard(mx, my))
+    {
+        return false;
+    }
+
+    const Grid& targetGrid = board->state[board->currTurnId][board->xy2pos(mx, my)];
+    if (targetGrid.type == None || targetGrid.color == EMPTY)
+    {
+        return false;
+    }
+
+    if (targetGrid.type == King)
+    {
+        return board->attacked(attacker, mx, my);
+    }
+    return board->isattacked(attacker, mx, my);
 }
 
 void ChessAI::generateMovesWithForbidden()
@@ -2113,7 +2139,7 @@ int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
                 }
                 case Assistant:
                 case Bishop: {
-                    bool flag = this->isattacked(oppCol, x, y);
+                    bool flag = this->isattackedBy(oppCol, x, y);
                     // 仕相受威胁分通常不受残/中局影响或者直接取中局表
                     res += flag ? mid_AdvBis_Threat[posIndex] : mid_AdvBis_no_Threat[posIndex];
                     break;
@@ -2150,7 +2176,7 @@ int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
                 }
                 case Assistant:
                 case Bishop: {
-                    bool flag = this->isattacked(oppCol, x, y);
+                    bool flag = this->isattackedBy(oppCol, x, y);
                     // 仕相受威胁分通常不受残/中局影响或者直接取中局表
                     res -= flag ? mid_AdvBis_Threat[posIndex] : mid_AdvBis_no_Threat[posIndex];
                     break;
@@ -3012,8 +3038,9 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 bool ChessAI::havethreat(vector<Grid>& tmp,colorType color){
     for(int y = 9; y >= 0; y --){
         for(int x = 0;x <= 8;x ++){
-            if(tmp[board->xy2pos(x,y)].color == color && evaluator.isattacked(board->oppColor(),x,y)){
-                return true; //说明存在威胁
+            if(tmp[board->xy2pos(x,y)].color == color &&
+               evaluator.isattackedBy(board->oppColor(color), x, y)){
+                return true; // color方棋子被对方攻击，说明存在威胁
             }
         }
     }
@@ -3026,8 +3053,10 @@ bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
         for(int x = 0;x <= 8;x ++){
             auto tmptype = tmp[board->xy2pos(x,y)].type;
             bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
-            if(tmp[board->xy2pos(x,y)].color == color && is_important && evaluator.isattacked(board->oppColor(),x,y)){
-                return true; //说明存在威胁
+            if(tmp[board->xy2pos(x,y)].color == color &&
+               is_important &&
+               evaluator.isattackedBy(board->oppColor(color), x, y)){
+                return true; // color方重要棋子被对方攻击
             }
         }
     }
@@ -3038,8 +3067,9 @@ bool ChessAI::havethreat_of_valuestone(vector<Grid>& tmp,colorType color){
 bool ChessAI::haveattack(vector<Grid>& tmp,colorType color){
     for(int y = 9; y >= 0; y --){
         for(int x = 0;x <= 8;x ++){
-            if(tmp[board->xy2pos(x,y)].color == this->board->oppColor() && evaluator.isattacked(board->currColor,x,y)){
-                return true; //说明存在威胁
+            if(tmp[board->xy2pos(x,y)].color == board->oppColor(color) &&
+               evaluator.isattackedBy(color, x, y)){
+                return true; // color方正在攻击对方棋子
             }
         }
     }
@@ -3052,8 +3082,10 @@ bool ChessAI::haveattack_of_valuestone(vector<Grid>& tmp,colorType color){
         for(int x = 0;x <= 8;x ++){
             auto tmptype = tmp[board->xy2pos(x,y)].type;
             bool is_important = (tmptype == Rook || tmptype == Knight || tmptype == Cannon) ? true : false;
-            if(tmp[board->xy2pos(x,y)].color == board->oppColor() && is_important && evaluator.isattacked(board->currColor,x,y)){
-                return true; //说明存在威胁
+            if(tmp[board->xy2pos(x,y)].color == board->oppColor(color) &&
+               is_important &&
+               evaluator.isattackedBy(color, x, y)){
+                return true; // color方正在攻击对方重要棋子
             }
         }
     }
