@@ -118,10 +118,10 @@ namespace Tuning {
     inline int getMVVLVAScore(stoneType attacker, stoneType victim, bool isProtected) {
         if (victim == None) {
             return 0;
-        }
-        // attackerPenalty 被保护时减去攻击者价值
-        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] : 0;
-        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - attackerPenalty;
+        }//MVV/LAA
+
+        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] :0;
+        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - Tuning::AttackerValue[attacker];
     }
 }
 
@@ -456,16 +456,36 @@ public:
     ChessAI& operator=(const ChessAI&) = delete;
     ~ChessAI();
 };
-void getInputBotzone(Chess &chess);   // 处理Botzone平台输入
+bool getInputBotzone(Chess &chess);   // 处理Botzone平台输入
+bool getInputBotzone(Chess &chess,colorType &botcolor); //处理Botzone平台输入，传参为botzone平台给出的当前棋子颜色
 void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
+void outputFallBotzone(Chess *chess);
 
 int main()
 {
-    InitZobrist();
     Chess chess;
-    getInputBotzone(chess);
-    giveOutputBotzone(chess);
-    return 0;
+    bool boardReady = false;
+    try{
+        InitZobrist();
+        colorType botColor = EMPTY;
+
+        //cerr为标准错误输出流,不经过缓冲区
+        if(!getInputBotzone(chess,botColor)){
+            std::cerr << "fail to get Botzone input" << endl;
+            return 0;
+        }
+
+        boardReady = true;
+
+        giveOutputBotzone(chess);
+        return 0;
+    }
+    catch(const std::exception &e)
+    {
+        std::cerr << "[FATAL] uncaught exception: " << e.what() << std::endl;
+        outputFallBotzone(boardReady ? &chess : nullptr);
+        return 0;
+    }
 }
 
 //将Move转换到Json的工具接口
@@ -475,6 +495,37 @@ void writeMoveToJson(Json::Value& ret,Move& target){
 
     ret["response"]["target"] =
         string(1,pgnint2char(target.target_x)) + string(1,int2char(target.target_y));
+}
+
+//给出随机着法兜底
+void outputFallBotzone(Chess *chess){
+    Json::Value ret;
+
+    if (chess != nullptr)
+    {
+        vector<Move> moves;
+
+        chess->generateMovesWithForbidden(moves, true);
+
+        // 如果禁手版生成失败，退一步用基础合法着法，至少避免空输出。
+
+        if (!moves.empty())
+        {
+            Move m = moves[0];
+            writeMoveToJson(ret, m);
+
+            Json::FastWriter writer;
+            cout << writer.write(ret) << endl;
+            return;
+        }
+    }
+
+    // 实在无法恢复状态时，只能认输/无着。
+    ret["response"]["source"] = string("-1");
+    ret["response"]["target"] = string("-1");
+
+    Json::FastWriter writer;
+    cout << writer.write(ret) << endl;
 }
 
 // 向Botzone平台输出落子的函数定义
@@ -621,7 +672,7 @@ void giveOutputBotzone(Chess& chess){
     cout << writer.write(ret) << endl;
 }
 // 解析Botzone平台输入以更新棋局状态的函数定义
-void getInputBotzone(Chess &chess)
+bool getInputBotzone(Chess &chess)
 {
     string str;
     getline(cin, str);
@@ -666,10 +717,64 @@ void getInputBotzone(Chess &chess)
         if (!chess.isMoveValidWithForbidden(curMove))
         {
             throw std::runtime_error("input is not valid!");
+            return false;
         }
         chess.makeMoveAssumeLegal(curMove);
     }
+    return true;
 }
+
+bool getInputBotzone(Chess &chess,colorType &botColor)
+{
+    string str;
+    getline(cin, str);
+    Json::Reader reader;
+    Json::Value input;
+    reader.parse(str, input);
+    int turnID = input["responses"].size();
+    // 第一回合收到的起点是"-1", 说明我是红方
+    colorType currBotColor = botColor;
+    string curSource, curTarget;
+    for (int i = 0; i < turnID; i++)
+    {
+        // 根据这些输入输出逐渐恢复状态到当前回合
+        curSource = input["requests"][i]["source"].asString();
+        curTarget = input["requests"][i]["target"].asString();
+        if (curSource != "-1")
+        {
+            Move curMove(curSource, curTarget);
+            if (!chess.isMoveValidWithForbidden(curMove))
+            {
+                throw std::runtime_error("input is not valid!");
+            }
+            chess.makeMoveAssumeLegal(curMove);
+        }
+
+        curSource = input["responses"][i]["source"].asString();
+        curTarget = input["responses"][i]["target"].asString();
+        Move curMove(curSource, curTarget);
+        if (!chess.isMoveValidWithForbidden(curMove))
+        {
+            throw std::runtime_error("input is not valid!");
+        }
+        chess.makeMoveAssumeLegal(curMove);
+    }
+
+    curSource = input["requests"][turnID]["source"].asString();
+    curTarget = input["requests"][turnID]["target"].asString();
+    if (curSource != "-1")
+    {
+        Move curMove(curSource, curTarget);
+        if (!chess.isMoveValidWithForbidden(curMove))
+        {
+            throw std::runtime_error("input is not valid!");
+            return false;
+        }
+        chess.makeMoveAssumeLegal(curMove);
+    }
+    return true;
+}
+
 
 // 重置棋盘状态为初始状态的函数定义
 void Chess::resetBoard()
