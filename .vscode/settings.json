@@ -3,7 +3,8 @@
         "random": "cpp",
         "iostream": "cpp",
         "stdexcept": "cpp",
-        "fstream": "cpp"
+        "fstream": "cpp",
+        "ostream": "cpp"
     },
     "C_Cpp.errorSquiggles": "Enabled"
 }
