@@ -2949,21 +2949,34 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     // 搜索计时从根节点开始
     searchTime.start();
 
+    //迭代加深逻辑
     try {
-        for(auto& Node : selected){
-            searchTime.check();
-            
-            {
-                MoveGuard guard(this, Node); //局面按照当前Move进行一次，相当于博弈树向下一层遍历
-                int score = -alpha_beta_PVS_search(max_depth - 1,-beta,-alpha);
+        //外层增加迭代加深循环：从深度1查到max_depth
+        for(int d = 1;d <= max_depth;d ++){
+            int alpha = minstateval;
+            int beta = maxstateval;
 
-                //将深层传回来的得分，记录到根节点的MoveNode属性中
-                Node.value = score;
+            for(auto& Node : select){
+                searchTime.check();
+                {
+                    MoveGuard guard(this,Node);
+                    int score = -alpha_beta_PVS_search(d - 1,-beta,-alpha);
+
+                    Node.value = score;
+                }
+
+                if(Node.value > alpha){
+                    alpha = Node.value;
+                }
             }
 
-            //更新alpha
-            if(Node.value > alpha){
-                alpha = Node.value;
+            // 每一层搜索完整结束后，将最优着法排到最前。
+            // 这对下一层迭代时的 PVS 零窗口和 Alpha-Beta 剪枝效率至关重要
+            sort(selected.begin(), selected.end(), MoveNodecmp);
+            
+            // 如果已经找到了必胜步，直接提前结束剩余更大深度的搜素
+            if (!selected.empty() && selected[0].value > 900000) {
+                break;
             }
         }
     } catch (const TimeOutException &) {
