@@ -334,8 +334,8 @@ public:
 class EvalRecord{
 public:
     Chess *board; //评估类含有的Chess指针，用于调用Chess中的方法
-    void copyBoard(Chess *currentBoard) { board = currentBoard; } //
-
+    //void copyBoard(Chess *currentBoard) { board = currentBoard; } //
+    void bindBoard(Chess &currentBoard) { board = &currentBoard; }
     int GridControl[2][90];  //红 / 黑方在9*10棋盘上控制的 点数(红:0 黑:1)
     bool havecontrol[90];    //不是“是否控制了该点”，而是对于该位置上的我方棋子，所所控制的点上，有对方的棋子为true，即某个棋子是否有吃到对方棋子的机会
 
@@ -473,7 +473,8 @@ void giveOutputBotzone(Chess& chess){
     if(!hasselectedmove){
     //2.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
         try{
-            ChessAI AI(&chess);
+            Chess searchBoard = chess;
+            ChessAI AI(&searchBoard);
 
             AI.alpha_beta_PVS_select(AI.select);
             if(AI.select.empty() == false){
@@ -485,7 +486,7 @@ void giveOutputBotzone(Chess& chess){
             }
         }
         
-        }catch(const std::exception&){
+        }catch(const std::exception& e){
             hasselectedmove = false;
         }
     }
@@ -1498,6 +1499,9 @@ bool Chess::isMoveValidWithForbidden(const Move &move, bool mustDefend)
 
 void ChessAI::getcurstones()
 {
+    evaluator.curstones.clear();
+    evaluator.curattacked.clear();
+
     colorType Color = this->board->currColor;
     int tmp = this->board->currTurnId;
     for (int y = 9; y >= 0; y--)
@@ -1704,8 +1708,8 @@ void ChessAI::getdiffmoves()
 }
 
 ChessAI::ChessAI(): board(new Chess()),ownBoard(true),searchTime(900){
-    evaluator.copyBoard(board);
-
+    //evaluator.copyBoard(board);
+    evaluator.bindBoard(*board);
     evaluator.isKingattacked = false;
 
 }
@@ -1715,8 +1719,8 @@ ChessAI::ChessAI(Chess* otherboard) : board(otherboard),ownBoard(false),searchTi
         throw std::runtime_error("Chess external obj is nullptr");
     }
 
-    evaluator.copyBoard(board);
-
+    //evaluator.copyBoard(board);
+    evaluator.bindBoard(*board);
     evaluator.isKingattacked = false;
 }
 
@@ -2776,16 +2780,16 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 
     //selected初始化 
     selected.clear();
-    for(auto& M : tmpMoves){
+    /*for(auto& M : tmpMoves){
         MoveNode newMoveNode;
         newMoveNode.strategy = M;
         newMoveNode.value = alpha;      //初始值赋值成极小值
         selected.push_back(newMoveNode);
     }
 
-    //不要忘记预先评价
-    MoveNodesort(selected);
-
+    //不要忘记预先评价*/
+    //MoveNodesort(selected);
+    this->fill_sort_inMoveNodes(selected, tmpMoves);
     // 搜索计时从根节点开始
     searchTime.start();
 
@@ -2831,15 +2835,14 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     board->generateMovesWithForbidden(tmpMoves);
 
     selected.clear();
-    for(auto& M : tmpMoves){
+    /*for(auto& M : tmpMoves){
         MoveNode newMoveNode;
         newMoveNode.strategy = M;
         newMoveNode.value = alpha;
         selected.push_back(newMoveNode);
-    }
-
-    MoveNodesort(selected);
-
+    }*/
+    //MoveNodesort(selected);
+    this->fill_sort_inMoveNodes(selected, tmpMoves);
     // 搜索计时从根节点开始
     searchTime.start();
 
