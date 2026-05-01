@@ -2105,6 +2105,187 @@ static const int end_Cannon[90] = {
    100,100,100,104,106,104,100,100,100,
 };
 
+//评估参数命名空间,专门用于修正局面评估 EvalRecord::calstaticstate()
+namespace Evalpara{
+    constexpr int PhaseTotal = 66;  //中残局插值的总权重
+
+    inline int sideIndex(colorType c) {  //颜色转数组索引
+        return c == RED ? 0 : 1;
+    }
+
+    inline colorType sideFromIndex(int idx) {   //数组索引转颜色
+        return idx == 0 ? RED : BLACK;
+    }
+
+    inline int relIndex(int x, int y, colorType c) {   //红黑y轴映射转换
+        int relY = (c == RED) ? (9 - y) : y;
+        return relY * BOARDWIDTH + x;
+    }
+
+    inline int interp(int midValue, int endValue, int weightMid) {   //中局表和残局表的插值函数
+        int weightEnd = PhaseTotal - weightMid;
+        return (midValue * weightMid + endValue * weightEnd) / PhaseTotal;
+    }
+
+    // 棋子存活价值
+    // King 不用物质分参与常规差值；胜负仍由 getWin()/iftmpLose()/合法着法处理。
+    static const int LiveValue[8] = {
+        0,      // None
+        0,      // King
+        200,    // Bishop / Elephant
+        430,    // Knight
+        900,    // Rook
+        110,    // Pawn
+        450,    // Cannon
+        200     // Assistant / Advisor
+    };
+
+    // 将帅安全表：强烈鼓励原位，中宫上移显著扣分，解决无威胁乱动帅/将的问题。
+    static const int KingSafePST[90] = {
+        0,0,0,-120,-110,-120,0,0,0,
+        0,0,0,-110,-100,-110,0,0,0,
+        0,0,0,-100, -90,-100,0,0,0,
+        0,0,0,   0,   0,   0,0,0,0,
+        0,0,0,   0,   0,   0,0,0,0,
+        0,0,0,   0,   0,   0,0,0,0,
+        0,0,0,   0,   0,   0,0,0,0,
+        0,0,0, -75, -65, -75,0,0,0,
+        0,0,0, -35, -28, -35,0,0,0,
+        0,0,0,  12,  45,  12,0,0,0
+    };
+
+    //士位置表
+    static const int AdvisorPST[90] = {
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,16,0,16,0,0,0,
+        0,0,0,0,30,0,0,0,0,
+        0,0,0,18,0,18,0,0,0
+    };
+
+    //相位置表
+    static const int BishopPST[90] = {
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,0,0,0,0,0,0,0,
+        0,0,22,0,0,0,22,0,0,
+        0,0,0,0,0,0,0,0,0,
+        24,0,0,0,28,0,0,0,24,
+        0,0,0,0,0,0,0,0,0,
+        0,0,18,0,0,0,18,0,0
+    };
+
+    // 兵卒中局表：row 9 是己方底线，row 0 是对方底线；越接近对方九宫价值越高。
+    static const int PawnMidPST[90] = {
+        75, 80, 85, 95,110, 95, 85, 80, 75,
+        68, 72, 78, 88,100, 88, 78, 72, 68,
+        58, 62, 68, 76, 86, 76, 68, 62, 58,
+        44, 48, 54, 60, 68, 60, 54, 48, 44,
+        30, 34, 38, 42, 48, 42, 38, 34, 30,
+        18, 20, 24, 28, 32, 28, 24, 20, 18,
+         8, 10, 12, 16, 20, 16, 12, 10,  8,
+         0,  0,  2,  4,  8,  4,  2,  0,  0,
+         0,  0,  0,  0,  2,  0,  0,  0,  0,
+         0,  0,  0,  0,  0,  0,  0,  0,  0
+    };
+
+    //兵卒残局位置表
+    static const int PawnEndPST[90] = {
+        95,100,105,115,130,115,105,100, 95,
+        86, 90, 96,106,120,106, 96, 90, 86,
+        72, 76, 82, 92,104, 92, 82, 76, 72,
+        56, 60, 66, 74, 84, 74, 66, 60, 56,
+        38, 42, 48, 54, 62, 54, 48, 42, 38,
+        22, 25, 28, 34, 40, 34, 28, 25, 22,
+        10, 12, 14, 18, 24, 18, 14, 12, 10,
+         0,  0,  3,  6, 10,  6,  3,  0,  0,
+         0,  0,  0,  0,  2,  0,  0,  0,  0,
+         0,  0,  0,  0,  0,  0,  0,  0,  0
+    };
+
+    //计算棋子位置修正分，简单逻辑：位置分为几十点，大子为棋子存活分段 一半
+    inline int normalizedPieceSquare(stoneType type, int posIndex, int weightMid, bool hasCaptureChance) {
+        switch (type) {
+        case King:
+            return KingSafePST[posIndex];
+        case Assistant:
+            return AdvisorPST[posIndex];
+        case Bishop:
+            return BishopPST[posIndex];
+        case Pawn: {
+            int v = interp(PawnMidPST[posIndex], PawnEndPST[posIndex], weightMid);
+            if (hasCaptureChance) v += 18;
+            return v;
+        }
+        case Knight: {
+            int midBonus = (mid_horse[posIndex] - 95) * 2;
+            int endBonus = (end_horse[posIndex] - 96) * 2;
+            return interp(midBonus, endBonus, weightMid);
+        }
+        case Rook: {
+            int midBonus = mid_Rook[posIndex] - 205;
+            int endBonus = end_Rook[posIndex] - 182;
+            return interp(midBonus, endBonus, weightMid);
+        }
+        case Cannon: {
+            int midBonus = (mid_Cannon[posIndex] - 98) * 2;
+            int endBonus = (end_Cannon[posIndex] - 101) * 2;
+            return interp(midBonus, endBonus, weightMid);
+        }
+        default:
+            return 0;
+        }
+    }
+
+    //静态单子价值计算函数
+    inline int staticPieceValue(stoneType type, int posIndex, int weightMid, bool hasCaptureChance) {
+        return LiveValue[type] + normalizedPieceSquare(type, posIndex, weightMid, hasCaptureChance);
+    }
+
+    //动态控制点评估：攻击奖励
+    inline int threatBonus(stoneType victim) {
+        switch (victim) {
+        case King:      return 500;
+        case Rook:      return 135;
+        case Cannon:    return 82;
+        case Knight:    return 78;
+        case Assistant: return 34;
+        case Bishop:    return 34;
+        case Pawn:      return 24;
+        default:        return 0;
+        }
+    }
+
+    //动态控制点评估：保护奖励，避免无根子情况的出现
+    inline int defenceBonus(stoneType ownPiece) {
+        switch (ownPiece) {
+        case Rook:      return 10;
+        case Cannon:    return 7;
+        case Knight:    return 7;
+        case Assistant: return 5;
+        case Bishop:    return 5;
+        case Pawn:      return 3;
+        default:        return 0;
+        }
+    }
+
+    //送子惩罚(对方控制数量大于己方控制数量)
+    inline int hangingPenalty(stoneType ownPiece) {
+        if (ownPiece == King || ownPiece == None) return 0;
+        int p = LiveValue[ownPiece] / 8;
+        if (p < 12) p = 12;
+        if (p > 140) p = 140;
+        return p;
+    }
+}
+
 //填充Gridcontrol 格点控制表
 void EvalRecord::getGridcontrol(){
     if(board == nullptr){
@@ -2804,7 +2985,7 @@ int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
 
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
-
+    getGridcontrol();
     int res = 0;
     res += this->calstaticstate(target,color);
     res += this->caldynamicstate(target,color);
