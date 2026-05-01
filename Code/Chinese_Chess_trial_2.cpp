@@ -353,7 +353,11 @@ public:
     int calcurmove(Move& curmove,vector<Grid>& curstate,colorType color);      //(State[cur],Move[cur]) --> State[after] : score
 
     
-    EvalRecord() : board(nullptr), isKingattacked(false) {}
+    EvalRecord() : board(nullptr), isKingattacked(false) 
+    {
+        memset(GridControl, 0, sizeof(GridControl));
+        memset(havecontrol, 0, sizeof(havecontrol));
+    }
 };
 
 const int max_depth = 64;       //最大搜素深度
@@ -376,6 +380,7 @@ public:
     Move killerMoves[max_depth][2];                            //杀手着法表，假设最大搜素深度为Max_Search_Depth 每层杀手着法数目设为2
     // ChessAI方法                                      
     bool getWin();                                                            //更新isWin,判断是否胜利
+    bool iftmpLose();                                                         //当前走棋的一方是否没有将/帅
     void getcurstones(void);
     void generateMovesWithForbidden();                                        //对应board的同名方法
     void getdiffmoves();                                                      //得到吃子 / 非吃子 着棋
@@ -1460,8 +1465,11 @@ bool Chess::isattacked(colorType color, int mx, int my)
             case King:
             {
                 // King不能超出九宫格  我方是否在对方 将/帅 的九宫格内？
-                if ((abs(dex) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))) || (abs(dex) == 0 && abs(dey) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))))
-                {
+                // if ((abs(dex) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))) || (abs(dex) == 0 && abs(dey) == 1 && abs(dey) == 0 && inKingArea(mx, my, oppColor(currColor))))
+                // {
+                //     return true;
+                // }
+                if (abs(dex) + abs(dey) == 1 && inKingArea(mx, my, color)) {
                     return true;
                 }
                 break;
@@ -1832,8 +1840,9 @@ void EvalRecord::getGridcontrol(){
                     }
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
                     //这里不使用color传参，使用board中的currColor
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 //将帅照面：King沿竖线遇到对方King时，同样计为可控制
@@ -1867,8 +1876,9 @@ void EvalRecord::getGridcontrol(){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
                     
                     //填充havecontrol
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 break;
@@ -1888,8 +1898,9 @@ void EvalRecord::getGridcontrol(){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
 
                     //填充havecontrol
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 break;
@@ -1909,8 +1920,9 @@ void EvalRecord::getGridcontrol(){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
 
 
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 break;
@@ -1921,8 +1933,9 @@ void EvalRecord::getGridcontrol(){
                     int tx = x + dx_strai[dir], ty = y + dy_strai[dir];
                     while(board->inBoard(tx, ty)){
                         GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                            this->havecontrol[board->xy2pos(x,y)] = true;
+                        auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                            this->havecontrol[board->xy2pos(x, y)] = true;
                         }
                         auto &tGrid = board->state[tmp][board->xy2pos(tx, ty)];
                         if(tGrid.color != EMPTY){
@@ -1950,8 +1963,9 @@ void EvalRecord::getGridcontrol(){
                         }else{
                             if(tGrid.color != EMPTY){
                                 GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                            if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                                this->havecontrol[board->xy2pos(x,y)] = true;
+                            auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                            if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                                this->havecontrol[board->xy2pos(x, y)] = true;
                             }
                                 break;
                             }
@@ -1968,8 +1982,9 @@ void EvalRecord::getGridcontrol(){
                 int tx = x, ty = y + forwardOne;
                 if(board->inBoard(tx, ty)){
                     GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                    if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                        this->havecontrol[board->xy2pos(x,y)] = true;
+                    auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                    if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                        this->havecontrol[board->xy2pos(x, y)] = true;
                     }
                 }
                 bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
@@ -1979,9 +1994,11 @@ void EvalRecord::getGridcontrol(){
                         if(board->inBoard(tx, ty)){
                             GridControl[colorId][board->xy2pos(tx, ty)] ++;
                         }
-                        if(curGrid.color == board->oppColor() && board->state[tmp][board->xy2pos(tx,ty)].type != None){
-                            this->havecontrol[board->xy2pos(x,y)] = true; //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
-                        }
+                        auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
+                        if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                            this->havecontrol[board->xy2pos(x, y)] = true;
+                        } //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
+                        
                     }
                 }
                 break;
@@ -2594,11 +2611,18 @@ void ChessAI::MoveNodeBack(MoveNode& tmpmove){
     this->board->undoMove();
 }
 
+//在搜素树遍历中，管理棋盘状态（落子和取消落子），RAII标准
 struct MoveGuard {
     ChessAI* ai;
     MoveNode& node;
     MoveGuard(ChessAI* a, MoveNode& n) : ai(a), node(n) { ai->MoveNodeFront(node); }
     ~MoveGuard() { ai->MoveNodeBack(node); }
+};
+
+struct NullMoveGuard{
+    ChessAI* ai;
+    NullMoveGuard(ChessAI* a) : ai(a) {ai->board->makeNullMove();}
+    ~NullMoveGuard() {ai->board->undoMove(); }
 };
 
 //该步是否获得胜利
@@ -2612,9 +2636,22 @@ bool ChessAI::getWin(){
     return true;
 }
 
+bool ChessAI::iftmpLose(){
+    if(board == nullptr){
+        throw std::runtime_error("(iftmpLose) board is null");
+    }
+    const vector<Grid>& curstate = board->state[board->currTurnId];
+
+    for(const auto& grid : curstate){
+        if(grid.color == board->currColor && grid.type == King){
+            return false;
+        }
+    }
+    return true;
+}
 //初始化min max值
-const int minstateval = -9999999;
-const int maxstateval = 9999999;
+const int minstateval = -999999;
+const int maxstateval = 999999;
 //着重考虑selected等全局变量应该如何处理
 void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
     int max_depth = 10;  //最大搜素深度
@@ -2719,9 +2756,10 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
 }
 
 //alpha —— beta 具体搜索函数 将函数入口和函数体相剥离
-
+const int matescore = 1000000; //终局胜负分不能直接等于maxstateval,给alpha-beta
 int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
     searchTime.check();
+
 
     if (depth == 0) { 
         // evaluator部分获取当前局面状态 ———— 该方法以ClassAI单例调用为前提 
@@ -2729,16 +2767,18 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
         return quiescence_search(alpha, beta);//进入静态搜索解决水平线效应
     }
 
-    if(getWin()){
-        return 999999; 
-    }
+
     const int R = 2; // 深度缩减参数(Reduction)
     if (depth >= R + 1 && !havethreat(this->board->state[board->currTurnId], board->currColor)) {
         this->MoveNodeVoid(); // 执行空步
 
         // 尝试一个零窗口探测计算空步后的局面价值
-        int null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
-
+        int null_val;
+        //类似于MoveGuard，这里空步仍然需要MoveGuard
+        {
+            NullMoveGuard tmpguard(this);
+            null_val = -alpha_beta_PVS_search(depth - 1 - R, -beta, -beta + 1);
+        }
         this->board->undoNullMove(); // 撤销空步
 
         // 如果空着之后的得分比现有的beta更好，则认为此节点为beta节点，产生截断
@@ -2779,6 +2819,9 @@ int ChessAI::alpha_beta_search(int depth, int alpha, int beta) {
 int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     searchTime.check();
     
+    if(iftmpLose()){
+        return -matescore - depth;
+    }
     //获取当前的Zobrist Key
     uint64_t curkey = this->board->getZobristKey();
     int TT_val;
@@ -2820,7 +2863,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     board->generateMovesWithForbidden(tmpMoves);
     
     // （如有死局则返回极小的评估值，代表被将死）
-    if (tmpMoves.empty()) return minstateval + 100 * (4 - depth); // 越早被将死，分数越低 100为“偏移系数”
+    if (tmpMoves.empty()) return -matescore - depth; // 越早被将死，分数越低 100为“偏移系数”
 
     vector<MoveNode> tmpMoveNodes;
     this->fill_sort_inMoveNodes(tmpMoveNodes,tmpMoves);

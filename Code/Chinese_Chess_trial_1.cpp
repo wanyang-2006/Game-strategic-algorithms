@@ -2436,12 +2436,19 @@ enum AdvisorShapeType {
 
 // 计算特殊阵型（空头炮、窝心马）判定造成的罚分，罚分值越大说明阵型越糟糕
 int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
+    if(board == nullptr){
+        throw std::runtime_error("(calShapePenalty) board is null");
+    }
+
     int penalty = 0;
     colorType oppColor = (color == RED) ? BLACK : RED;
     
+    // 当前整份程序采用的坐标系：
+    // RED   底线 y = 0，九宫 y = 0..2，兵向 y + 1 前进
+    // BLACK 底线 y = 9，九宫 y = 7..9，卒向 y - 1 前进
     // 获取我方将帅的位置 (假设坐标系RED阵营底线y=9, BLACK底线y=0)
-    int kingY = (color == RED) ? 9 : 0;
-    int centerM_Y = (color == RED) ? 8 : 1; // 所谓窝心马的位置必定在九宫中心点
+    int kingY = (color == RED) ? 0 : 9;
+    int centerM_Y = (color == RED) ? 1 : 8; // 所谓窝心马的位置必定在九宫中心点
     
     int kingPos = board->xy2pos(4, kingY);
     if (target[kingPos].type != King || target[kingPos].color != color) {
