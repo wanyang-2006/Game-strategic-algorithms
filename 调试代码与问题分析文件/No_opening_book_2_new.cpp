@@ -2559,6 +2559,14 @@ int EvalRecord::getMidgameWeight(vector<Grid>& target){
 }
 
 //注意：静态棋力表中的数据均为对红方而言的数据，颜色不同时，需要翻转————(9 - x,10 - y)
+/*
+   计算局面的静态评估分
+   1. 静态评估侧重于棋子本身的“存活价值”以及“位置价值”（Piece-Square Table, 类似于Eleeye）。
+   2. 动态阶段识别：通过 getMidgameWeight(target) 计算当前是偏向中局还是残局。
+      棋盘上大子（车、马、炮）越多，中局权重 weightMid 越大；反之逐渐将阶段平滑过渡到残局。
+   3. 遍历棋盘统计双方的子力总价值差：
+
+ */
 //参考Eleeye中的静态估值 vec调用board->state中的当前状态
 int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
 {
@@ -2568,7 +2576,7 @@ int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
    
     colorType oppCol = (color == RED) ? BLACK : RED;
     int res = 0;
-    // 计算当前局面的中局权重
+    // 计算当前局面的中局权重，用于插值评估
     int weightMid = getMidgameWeight(target);
     int weightEnd = Total_state - weightMid;
 
@@ -2577,13 +2585,18 @@ int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
             auto& curGrid = target[board->xy2pos(x, y)];
             int pos = board->xy2pos(x,y);
             const Grid& curGrid = target[pos];
+
             if(curGrid.type == None || curGrid.color == EMPTY){
                 continue;
             }
 
+            // 获取该子相对于自身颜色的坐标索引，如红方和黑方的同一视觉位置是对称的
             int posIndex = Evalpara::relIndex(x,y,curGrid.color);
+            // 记录该子是否有控制点/行动力
             bool canCaptureNow = havecontrol[pos];
+            // 计算单个棋子的最终静态评分：结合子力类型、位置索引、当前的棋局阶段（中局权重），以及控制
             int pieceValue = Evalpara::staticPieceValue(curGrid.type,posIndex,weightMid,canCaptureNow);
+            // 己方的子加分，敌方的子减分
             if(curGrid.color == color){
                 res += pieceValue;
             }else{
@@ -2759,95 +2772,165 @@ const int defenceweight = 1;      //或使用double，防御权重
 
 //没有实现双方真正对比
 
+
 int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
-    //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
-    int myattack = 0,myDefense = 0; 
-    int oppattack = 0,oppDefence = 0;
 
-    //区分颜色
-    int idx = (color == RED) ? 0 : 1; //对应控制表内不同映射
-    for(int y = 9;y >= 0;y --){
-        for(int x = 0;x <= 8;x ++){
-            auto& tmpgrid = target[board->xy2pos(x,y)];
+
+    int sideScore[2] = {0,0};
+
+    // 遍历棋盘上的每一个位置，考察双方对该位置的控制情况
+    for(int y = 0;y < BOARDHEIGHT;y ++){
+        for(int x = 0;x < BOARDWIDTH;x ++){
             int pos = board->xy2pos(x,y);
-
-            if(idx == 0){//红方打分
-                if(y <= 4){ //红方半场
-                    if(board->inKingArea(x,y,RED)){
-                        myDefense += GridControl[idx][pos] * OwnKingArea;
-                    }else{
-                        myDefense += GridControl[idx][pos] * OwnHalf;
-                    }
-                }else{ //y >= 5
-                    if(board->inKingArea(x,y,BLACK)){
-                        myattack += GridControl[idx][pos] * EnemyKingArea;
-                    }else{
-                        myattack += GridControl[idx][pos] * EnemyHalf;
-                    }
+            const Grid& tmp = target[pos];
+            
+            // sideIdx = 0/1 分别代表计算红方或黑方对此处的控制得分
+            for(int sideIdx = 0;sideIdx < 2;sideIdx ++){
+                int ctrl = GridControl[sideIdx][pos]; // 该阵营对位置(x,y)的控制（攻击/防守）次数
+                if(ctrl <= 0){
+                    continue;
                 }
-            }else{//黑方打分
-                if(y >= 5){ //黑方半场
-                    if(board->inKingArea(x,y,BLACK)){
-                        myDefense += GridControl[idx][pos] * OwnKingArea;
-                    }else{
-                        myDefense += GridControl[idx][pos] * OwnHalf;
-                    }
+
+                colorType side = Evalpara::sideFromIndex(sideIdx);
+                colorType oppside = board->oppColor(side);
+
+                int oppIdx = 1 - sideIdx;
+                // 控制次数限制为2
+                int cappedCtrl = std::min(ctrl,2);
+
+                // 1.纯控制点价值：按九宫格、半场区域的不同给予阵地压制得分
+                int pointWeight = 0;
+                if(Chess::inKingArea(x, y, oppside)){
+                    pointWeight = EnemyKingArea;
+                }else if(!Chess::inColorArea(x, y, side)){
+                    pointWeight = EnemyHalf;
+                }else if(Chess::inKingArea(x, y, side)){
+                    pointWeight = OwnKingArea;
                 }else{
-                    if(board->inKingArea(x,y,RED)){
-                        myattack += GridControl[idx][pos] * EnemyKingArea;
-                    }else{
-                        myattack += GridControl[idx][pos] * EnemyHalf;
+                    pointWeight = OwnHalf;
+                }
+                sideScore[sideIdx] += cappedCtrl * pointWeight;
+
+                // 2.控制对方有子点 (进攻分)
+                // 考虑进攻价值：
+                if(tmp.color == oppside && tmp.type != None){
+                    int bonus = Evalpara::threatBonus(tmp.type) * cappedCtrl;
+                    bool defendedByOpponent = GridControl[oppIdx][pos] > 0;
+                    if(!defendedByOpponent && tmp.type != King){
+                        // 如果对方棋子缺乏保护（悬空），给予额外惩罚（相当于我方极大优势）
+                        bonus += Evalpara::hangingPenalty(tmp.type);
+                    }
+                    sideScore[sideIdx] += bonus;
+                }
+
+                // 3.控制己方有子点 (防守分)
+                // 考虑保护价值：
+                if(tmp.color == side && tmp.type != None && tmp.type != King){
+                    sideScore[sideIdx] += Evalpara::defenceBonus(tmp.type) * cappedCtrl;
+                    int enemyCtrl = GridControl[oppIdx][pos];
+                    // 如果敌方进攻该点的次数 多于 己方保护该点的次数，说明保护不足（随时可能被吃）
+                    if(enemyCtrl > ctrl){
+                        sideScore[sideIdx] -= Evalpara::hangingPenalty(tmp.type);
                     }
                 }
             }
+
         }
     }
-
-
-    for(int y = 9;y >= 0;y --){
-        for(int x = 0;x <= 8;x ++){
-            auto& tmpgrid = target[board->xy2pos(x,y)];
-            int pos = board->xy2pos(x,y);
-
-            if(idx == 0){//红方给黑方（对手打分）
-                if(y <= 4){ //红方半场
-                    if(board->inKingArea(x,y,RED)){
-                        oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
-                    }else{
-                        oppattack += GridControl[1 - idx][pos] * EnemyHalf;
-                    }
-                }else{ //y >= 5
-                    if(board->inKingArea(x,y,BLACK)){
-                        oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
-                    }else{
-                        oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
-                    }
-                }
-            }else{//黑方打分
-                if(y >= 5){ //黑方半场
-                    if(board->inKingArea(x,y,BLACK)){
-                        oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
-                    }else{
-                        oppattack += GridControl[1 - idx][pos] * EnemyHalf;
-                    }
-                }else{
-                    if(board->inKingArea(x,y,BLACK)){
-                        oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
-                    }else{
-                        oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
-                    }
-                }
-            }
-        }
-    }
-    //进攻度分析 ———— Gridcontrol 我方在对方半场的控制点、对方在对方半场的控制点
-
-    //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
-
-    //最终结果为：我方总得分 - 对方总得分
-    int res = myattack + myDefense - oppattack - oppDefence;
-    return res;
+    // 返回最终结果：己方动态分 - 敌方动态分
+    int idx = Evalpara::sideIndex(color);
+    return sideScore[idx] - sideScore[1 - idx];
 }
+
+// int EvalRecord::caldynamicstate(vector<Grid>& target,colorType color){
+//     //借鉴Eleeye中的参数和计算方法，现在仅考虑使用Gridcontrol，完成动态局面评估
+//     int myattack = 0,myDefense = 0; 
+//     int oppattack = 0,oppDefence = 0;
+
+//     //区分颜色
+//     int idx = (color == RED) ? 0 : 1; //对应控制表内不同映射
+//     for(int y = 9;y >= 0;y --){
+//         for(int x = 0;x <= 8;x ++){
+//             auto& tmpgrid = target[board->xy2pos(x,y)];
+//             int pos = board->xy2pos(x,y);
+
+//             if(idx == 0){//红方打分
+//                 if(y <= 4){ //红方半场
+//                     if(board->inKingArea(x,y,RED)){
+//                         myDefense += GridControl[idx][pos] * OwnKingArea;
+//                     }else{
+//                         myDefense += GridControl[idx][pos] * OwnHalf;
+//                     }
+//                 }else{ //y >= 5
+//                     if(board->inKingArea(x,y,BLACK)){
+//                         myattack += GridControl[idx][pos] * EnemyKingArea;
+//                     }else{
+//                         myattack += GridControl[idx][pos] * EnemyHalf;
+//                     }
+//                 }
+//             }else{//黑方打分
+//                 if(y >= 5){ //黑方半场
+//                     if(board->inKingArea(x,y,BLACK)){
+//                         myDefense += GridControl[idx][pos] * OwnKingArea;
+//                     }else{
+//                         myDefense += GridControl[idx][pos] * OwnHalf;
+//                     }
+//                 }else{
+//                     if(board->inKingArea(x,y,RED)){
+//                         myattack += GridControl[idx][pos] * EnemyKingArea;
+//                     }else{
+//                         myattack += GridControl[idx][pos] * EnemyHalf;
+//                     }
+//                 }
+//             }
+//         }
+//     }
+
+
+//     for(int y = 9;y >= 0;y --){
+//         for(int x = 0;x <= 8;x ++){
+//             auto& tmpgrid = target[board->xy2pos(x,y)];
+//             int pos = board->xy2pos(x,y);
+
+//             if(idx == 0){//红方给黑方（对手打分）
+//                 if(y <= 4){ //红方半场
+//                     if(board->inKingArea(x,y,RED)){
+//                         oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
+//                     }else{
+//                         oppattack += GridControl[1 - idx][pos] * EnemyHalf;
+//                     }
+//                 }else{ //y >= 5
+//                     if(board->inKingArea(x,y,BLACK)){
+//                         oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
+//                     }else{
+//                         oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
+//                     }
+//                 }
+//             }else{//黑方打分
+//                 if(y >= 5){ //黑方半场
+//                     if(board->inKingArea(x,y,BLACK)){
+//                         oppattack += GridControl[1 - idx][pos] * EnemyKingArea;
+//                     }else{
+//                         oppattack += GridControl[1 - idx][pos] * EnemyHalf;
+//                     }
+//                 }else{
+//                     if(board->inKingArea(x,y,BLACK)){
+//                         oppDefence += GridControl[1 - idx][pos] * EnemyKingArea;
+//                     }else{
+//                         oppDefence += GridControl[1 - idx][pos] * EnemyHalf;
+//                     }
+//                 }
+//             }
+//         }
+//     }
+//     //进攻度分析 ———— Gridcontrol 我方在对方半场的控制点、对方在对方半场的控制点
+
+//     //防御度分析 ———— Gridcontrol 我方在我方半场的控制点、对方在我方半场的控制点
+
+//     //最终结果为：我方总得分 - 对方总得分
+//     int res = myattack + myDefense - oppattack - oppDefence;
+//     return res;
+// }
 
 //静态评估系数(暂时采用int)、动态评估系数(暂时采用int)
 const int mystaticweight = 1;
