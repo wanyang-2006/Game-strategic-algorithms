@@ -3640,4 +3640,4 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
     //     std::cout << std::endl;
     // }
 
-//使用PSW进行搜索 —— 需要合适的MoveSort，否则"假设后面节点都不如A，再验证"意义不大！
+//使用PSW进行搜索 —— 需要合适的MoveSort，否则"假设后面节点都不如A，再验证"意义不大！ 
