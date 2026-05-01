@@ -14,6 +14,8 @@
 #include <random>
 #include <fstream>
 #include <cstring>
+#include <chrono>
+#include <stdexcept>
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -171,12 +173,13 @@ public:
 class SearchTime
 {
 private:
-    clock_t startTime;
-    int timeLimit_ms; // 毫秒
-    int checkerCount;
+    // 使用 steady_clock
+    std::chrono::steady_clock::time_point endTime;
+    int timeLimit_ms;          // 毫秒
+    unsigned int checkerCount; // 改为无符号整型
 
 public:
-    SearchTime(int limit_ms = 900) : startTime(0), timeLimit_ms(limit_ms), checkerCount(0) {}
+    SearchTime(int limit_ms = 900) : timeLimit_ms(limit_ms), checkerCount(0) {}
 
     void setLimitMs(int limit_ms)
     {
@@ -185,17 +188,15 @@ public:
 
     void start()
     {
-        startTime = clock();
+        endTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeLimit_ms);
         checkerCount = 0;
     }
 
     inline void check()
     {
-        if (checkerCount++ % 1024 == 0) // 每1024次检查一次时间
+        if ((++checkerCount & 255) == 0) 
         {
-            clock_t currentTime = clock();
-            double durationTime_ms = double(currentTime - startTime) / CLOCKS_PER_SEC * 1000;
-            if (durationTime_ms > timeLimit_ms)
+            if (std::chrono::steady_clock::now() > endTime)
             {
                 throw TimeOutException();
             }
