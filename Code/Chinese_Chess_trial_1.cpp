@@ -2827,7 +2827,7 @@ int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
 
     auto target_piece = curstate[target_pos].type;
     auto source_piece = curstate[source_pos].type;
-if (target_piece == None) {
+    if (target_piece == None) {
         return 0; // 不吃子时的得分
     }
 
@@ -3400,105 +3400,110 @@ bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
 */
 
 //这里移动一步没有回撤！
+//简化isQuietMove，防止LMR开销过大
+bool ChessAI::isQuietMove(vector<Grid>& tmpgrid,MoveNode& tmpmove){
+    int target_pos = board->xy2pos(tmpmove.strategy.target_x,tmpmove.strategy.target_y);
 
-bool ChessAI::isQuietMove(vector<Grid>& tmpgrid, MoveNode& tmpmove)
-{
-    if (board == nullptr) {
-        throw std::runtime_error("(isQuietMove) board is null");
-    }
-
-    const Move& move = tmpmove.strategy;
-
-    // 1. 基本坐标安全检查
-    if (!Chess::inBoard(move.source_x, move.source_y) ||
-        !Chess::inBoard(move.target_x, move.target_y)) {
-        return false; // 非法走法不能当作安静着法
-    }
-
-    int sourcePos = board->xy2pos(move.source_x, move.source_y);
-    int targetPos = board->xy2pos(move.target_x, move.target_y);
-
-    if (sourcePos < 0 || sourcePos >= 90 || targetPos < 0 || targetPos >= 90) {
-        return false;
-    }
-
-    if (tmpgrid.size() != 90) {
-        throw std::runtime_error("(isQuietMove) invalid board state size");
-    }
-
-    const Grid& sourceGrid = tmpgrid[sourcePos];
-    const Grid& targetGrid = tmpgrid[targetPos];
-
-    // 2. 源格必须是当前行动方棋子，否则不能认为是正常安静步
-    if (sourceGrid.color != board->currColor || sourceGrid.type == None) {
-        return false;
-    }
-
-    // 3. 吃子着法不是安静着法
-    bool isCapture = (targetGrid.color != EMPTY && targetGrid.color != sourceGrid.color);
-    if (isCapture) {
-        return false;
-    }
-
-    // 4. 用 MoveGuard 临时执行该步，作用域结束自动回撤
-    bool givesCheck = false;
-    bool createsValuableThreat = false;
-
-    {
-        MoveGuard guard(this, tmpmove);
-
-        // 执行 tmpmove 后，board->currColor 已经切换为对手颜色。
-        // 因此此时 currColor 表示“被走完这步后轮到行动的一方”，也就是对手。
-        colorType opponentAfterMove = board->currColor;
-        colorType moverColor = board->oppColor();
-
-        // 4.1 判断是否将军：查找对手将帅是否被刚刚行动的一方攻击
-        int oppKingX = -1;
-        int oppKingY = -1;
-
-        for (int x = 0; x < BOARDWIDTH; ++x) {
-            for (int y = 0; y < BOARDHEIGHT; ++y) {
-                const Grid& g = board->state[board->currTurnId][board->xy2pos(x, y)];
-                if (g.color == opponentAfterMove && g.type == King) {
-                    oppKingX = x;
-                    oppKingY = y;
-                    break;
-                }
-            }
-            if (oppKingX != -1) {
-                break;
-            }
-        }
-
-        // 如果对方将帅不存在，说明这是终局/异常战术局面，绝不应当视为安静着法
-        if (oppKingX == -1) {
-            return false;
-        }
-
-        givesCheck = board->attacked(moverColor, oppKingX, oppKingY);
-        if (givesCheck) {
-            return false;
-        }
-
-        // 4.2 判断是否制造了对方重要棋子的威胁。
-        // 注意：执行走子后，board->currColor 是对手。
-        // havethreat_of_valuestone(state, opponentAfterMove)
-        // 含义是：对手的重要棋子是否被当前刚走棋的一方攻击。
-        createsValuableThreat =
-            this->havethreat_of_valuestone(
-                board->state[board->currTurnId],
-                opponentAfterMove
-            );
-
-        if (createsValuableThreat) {
-            return false;
-        }
-    }
-
-    // 走到这里时，MoveGuard 已经自动 undoMove()，棋盘状态恢复。
-    // 非吃子、非将军、非捉重要子，才认为是安静着法。
-    return true;
+    return tmpgrid[target_pos].type == None;
 }
+// bool ChessAI::isQuietMove(vector<Grid>& tmpgrid, MoveNode& tmpmove)
+// {
+//     if (board == nullptr) {
+//         throw std::runtime_error("(isQuietMove) board is null");
+//     }
+
+//     const Move& move = tmpmove.strategy;
+
+//     // 1. 基本坐标安全检查
+//     if (!Chess::inBoard(move.source_x, move.source_y) ||
+//         !Chess::inBoard(move.target_x, move.target_y)) {
+//         return false; // 非法走法不能当作安静着法
+//     }
+
+//     int sourcePos = board->xy2pos(move.source_x, move.source_y);
+//     int targetPos = board->xy2pos(move.target_x, move.target_y);
+
+//     if (sourcePos < 0 || sourcePos >= 90 || targetPos < 0 || targetPos >= 90) {
+//         return false;
+//     }
+
+//     if (tmpgrid.size() != 90) {
+//         throw std::runtime_error("(isQuietMove) invalid board state size");
+//     }
+
+//     const Grid& sourceGrid = tmpgrid[sourcePos];
+//     const Grid& targetGrid = tmpgrid[targetPos];
+
+//     // 2. 源格必须是当前行动方棋子，否则不能认为是正常安静步
+//     if (sourceGrid.color != board->currColor || sourceGrid.type == None) {
+//         return false;
+//     }
+
+//     // 3. 吃子着法不是安静着法
+//     bool isCapture = (targetGrid.color != EMPTY && targetGrid.color != sourceGrid.color);
+//     if (isCapture) {
+//         return false;
+//     }
+
+//     // 4. 用 MoveGuard 临时执行该步，作用域结束自动回撤
+//     bool givesCheck = false;
+//     bool createsValuableThreat = false;
+
+//     {
+//         MoveGuard guard(this, tmpmove);
+
+//         // 执行 tmpmove 后，board->currColor 已经切换为对手颜色。
+//         // 因此此时 currColor 表示“被走完这步后轮到行动的一方”，也就是对手。
+//         colorType opponentAfterMove = board->currColor;
+//         colorType moverColor = board->oppColor();
+
+//         // 4.1 判断是否将军：查找对手将帅是否被刚刚行动的一方攻击
+//         int oppKingX = -1;
+//         int oppKingY = -1;
+
+//         for (int x = 0; x < BOARDWIDTH; ++x) {
+//             for (int y = 0; y < BOARDHEIGHT; ++y) {
+//                 const Grid& g = board->state[board->currTurnId][board->xy2pos(x, y)];
+//                 if (g.color == opponentAfterMove && g.type == King) {
+//                     oppKingX = x;
+//                     oppKingY = y;
+//                     break;
+//                 }
+//             }
+//             if (oppKingX != -1) {
+//                 break;
+//             }
+//         }
+
+//         // 如果对方将帅不存在，说明这是终局/异常战术局面，绝不应当视为安静着法
+//         if (oppKingX == -1) {
+//             return false;
+//         }
+
+//         givesCheck = board->attacked(moverColor, oppKingX, oppKingY);
+//         if (givesCheck) {
+//             return false;
+//         }
+
+//         // 4.2 判断是否制造了对方重要棋子的威胁。
+//         // 注意：执行走子后，board->currColor 是对手。
+//         // havethreat_of_valuestone(state, opponentAfterMove)
+//         // 含义是：对手的重要棋子是否被当前刚走棋的一方攻击。
+//         createsValuableThreat =
+//             this->havethreat_of_valuestone(
+//                 board->state[board->currTurnId],
+//                 opponentAfterMove
+//             );
+
+//         if (createsValuableThreat) {
+//             return false;
+//         }
+//     }
+
+//     // 走到这里时，MoveGuard 已经自动 undoMove()，棋盘状态恢复。
+//     // 非吃子、非将军、非捉重要子，才认为是安静着法。
+//     return true;
+// }
 
 int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
     searchTime.check();
