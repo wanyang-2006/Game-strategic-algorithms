@@ -3030,8 +3030,6 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 
 void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     int max_depth = 30;
-    int alpha = minstateval;
-    int beta = maxstateval;
     
     //搜素开始前，清空杀手着法表
     for(int i = 0;i < max_depth;i ++){
@@ -3051,6 +3049,8 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     }*/
     //MoveNodesort(selected);
     this->fill_sort_inMoveNodes(selected, tmpMoves);
+
+    vector<MoveNode> last_completed_selected = selected;
     // 搜索计时从根节点开始
     searchTime.start();
 
@@ -3061,7 +3061,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
             int alpha = minstateval;
             int beta = maxstateval;
 
-            for(auto& Node : select){
+            for(auto& Node : selected){
                 searchTime.check();
                 {
                     MoveGuard guard(this,Node);
@@ -3078,6 +3078,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
             // 每一层搜索完整结束后，将最优着法排到最前。
             // 这对下一层迭代时的 PVS 零窗口和 Alpha-Beta 剪枝效率至关重要
             sort(selected.begin(), selected.end(), MoveNodecmp);
+            last_completed_selected = selected; //保存本层结果
             
             // 如果已经找到了必胜步，直接提前结束剩余更大深度的搜素
             if (!selected.empty() && selected[0].value > 900000) {
@@ -3086,6 +3087,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
         }
     } catch (const TimeOutException &) {
         // 超时时保留当前已经评估出的最佳结果
+        selected = last_completed_selected;
     }
 
     sort(selected.begin(),selected.end(),MoveNodecmp);
