@@ -499,6 +499,67 @@ void writeMoveToJson(Json::Value& ret,Move& target){
 //     Json::FastWriter writer;
 //     cout << writer.write(ret) << endl;
 // }
+bool getchessbook(Chess& chess,Move& bookMove){
+    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
+    if(!fin.is_open()){
+        return false;
+    }
+
+    Json::Value book;
+    Json::Reader reader;
+    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
+        return false;            //Json解析失败
+    }
+
+    uint64_t tmpkey = chess.getZobristKey();
+    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
+    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
+        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
+    }
+
+    Json::Value &moves = book[keyStr];
+    // //选择count最大的走法
+    // int bestIdx = 0;
+    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
+
+    // for(int i = 1;i < moves.size();i ++){
+    //     int c = moves[i].get("count",0).asInt();
+    //     if(c > bestCount){
+    //         bestCount = c;
+    //         bestIdx = i;
+    //     }
+    // }
+
+    //在出现频次最高的 Move中随机挑选
+    
+    int bestCount = moves[0].get("count",0).asInt();
+    vector<int> selectIdxes{0};
+    for(int i = 1;i < moves.size();i ++){
+        int c = moves[i].get("count",0).asInt();
+        if(c > bestCount){
+            bestCount = c;
+            selectIdxes.clear();
+            selectIdxes.push_back(i);
+        }else if(c == bestCount){
+            selectIdxes.push_back(i);
+        }
+    }
+
+    srand(time(0));
+    int selectIdx = selectIdxes[rand() % selectIdxes.size()];
+
+    const Json::Value &m = moves[selectIdx]["move"];
+
+    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
+
+    //必须再验证合法性
+    if(!chess.isMoveValidWithForbidden(res)){
+        return false;
+    }
+
+    bookMove = res;
+    return true;
+}
 
 void giveOutputBotzone(Chess& chess){
     Json::Value ret;               
@@ -1494,7 +1555,7 @@ void Chess::printBoard()
     }
 }
 
-//======================以下为添加的函数方法=======================\\
+//======================以下为添加的函数方法======================
 
 //计算当前局面的 Zobrist Key
 uint64_t Chess::getZobristKey(){
@@ -1695,7 +1756,8 @@ bool EvalRecord::isattacked(colorType color, int mx, int my)
 //纯攻击查询：坐标(mx,my)上的棋子是否被attacker颜色攻击。
 //评估函数可能按任意 color 评估局面，不能把“攻击方颜色”绑定到当前行动方。
 bool EvalRecord::isattackedBy(colorType attacker,int mx,int my){
-    {
+    
+    if(board == nullptr){
         throw std::runtime_error("(isattackedBy) board is null");
     }
     if (!Chess::inBoard(mx, my))
@@ -3026,23 +3088,23 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     //置换表着法启发(Transposition Table Ordering)
     //原理：如果之前搜素过该局面，最佳着法会被保留，并强制将其提到第一位搜素
 
-    //=====HashTable排序    =====\\
+    //=====HashTable排序    ====
 
 
     int next_idx = 0;
     if(best_TT_Move.source_x != -1){
         for(int i = 0;i < tmpMoveNodes.size();i ++){
             if(tmpMoveNodes[i].strategy == best_TT_Move){
-                //=========将置换表最佳着法和杀手着法提升到前列===========\\ : 都能以最小代价最快剪枝
+                //=========将置换表最佳着法和杀手着法提升到前列=========== : 都能以最小代价最快剪枝
                 std::swap(tmpMoveNodes[0],tmpMoveNodes[i]);
                 next_idx = 1;
                 break;
             }
         }
     }
-    //=====HashTable排序完成=====\\
+    //=====HashTable排序完成=====
 
-    //=====杀手着法启发排序 =====\\
+    //=====杀手着法启发排序 =====
     //检查本深度的两个杀手着法并将其提升到next_idx位(HashTable(prior) -> killerMove)
     for(int k = 0;k < 2;k ++){
         if(killerMoves[depth][k].source_x != -1){
@@ -3056,7 +3118,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             }
         }
     }
-    //=====杀手着法启发排序完成 =====\\
+    //=====杀手着法启发排序完成 =====
 
 
 
@@ -3078,7 +3140,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
 
             if(foundPV){ //这里的检查区间设为[-alpha - 1,-alpha]
 
-                // =====LMR逻辑===== \\
+                // =====LMR逻辑===== 
                 
                 if(depth >= 3 && moveIndex && isQuiet){
                     int R = 1; //裁剪因子，减去深度R
@@ -3092,7 +3154,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                     //否则，使用常规的PVS零窗口搜素
                     val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha);
                 }
-                // =====LMR逻辑结束===== \\
+                // =====LMR逻辑结束===== 
 
                 if((val > alpha) && (val < beta)){ //本区间内检查失败！
                     val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
@@ -3113,7 +3175,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
             
 
             //记录本层的杀手着法 
-            //===================杀手着法逻辑=====================\\
+            //===================杀手着法逻辑=====================
 
             //当一个节点是的val >= beta，并且本着法为Quiet Move，将本着法记录 ———— 这说明着法具有巨大价值
             //吃子着法本身价值高，待添加吃子排序先验。这里仅考虑白手着法
@@ -3411,67 +3473,7 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
 }
 
 
-bool getchessbook(Chess& chess,Move& bookMove){
-    ifstream fin("data/opening_book.json"); //botzone平台中Json文件的路径，等价相对路径为 ./data/opening_book.json
-    if(!fin.is_open()){
-        return false;
-    }
 
-    Json::Value book;
-    Json::Reader reader;
-    if(!reader.parse(fin,book)){ //当前输入流ffin解析Json格式内容
-        return false;            //Json解析失败
-    }
-
-    uint64_t tmpkey = chess.getZobristKey();
-    string keyStr = to_string(tmpkey); //将64位hash 转换为为keyStr
-    if(!book.isMember(keyStr) || !book[keyStr].isArray() || book[keyStr].empty()){
-        return false;    //keyStr不为book中的成员、book中的keyStr项不为列表、keyStr列表项为空值
-    }
-
-    Json::Value &moves = book[keyStr];
-    // //选择count最大的走法
-    // int bestIdx = 0;
-    // int bestCount = moves[0].get("count",0).asInt(); //bestCount 记录在当前棋局状态下，开局库中出现频次最高的 走法的具体数值
-
-    // for(int i = 1;i < moves.size();i ++){
-    //     int c = moves[i].get("count",0).asInt();
-    //     if(c > bestCount){
-    //         bestCount = c;
-    //         bestIdx = i;
-    //     }
-    // }
-
-    //在出现频次最高的 Move中随机挑选
-    
-    int bestCount = moves[0].get("count",0).asInt();
-    vector<int> selectIdxes{0};
-    for(int i = 1;i < moves.size();i ++){
-        int c = moves[i].get("count",0).asInt();
-        if(c > bestCount){
-            bestCount = c;
-            selectIdxes.clear();
-            selectIdxes.push_back(i);
-        }else if(c == bestCount){
-            selectIdxes.push_back(i);
-        }
-    }
-
-    srand(time(0));
-    int selectIdx = selectIdxes[rand() % selectIdxes.size()];
-
-    const Json::Value &m = moves[selectIdx]["move"];
-
-    Move res(m["source_x"].asInt(),m["source_y"].asInt(),m["target_x"].asInt(),m["target_y"].asInt());
-
-    //必须再验证合法性
-    if(!chess.isMoveValidWithForbidden(res)){
-        return false;
-    }
-
-    bookMove = res;
-    return true;
-}
 
 //PVS算法
 //判断此次下子是否吃子  判断此棋子是否有吃子的机会
