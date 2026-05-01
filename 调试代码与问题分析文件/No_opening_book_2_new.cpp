@@ -1756,7 +1756,7 @@ bool Chess::isattacked(colorType color, int mx, int my)
             }
             case Assistant:
             {
-                if (inKingArea(mx, my, oppColor(color)))
+                if (inKingArea(mx, my, color))
                 {
                     if (abs(dex) == 1 && abs(dey) == 1)
                     {
@@ -1789,12 +1789,10 @@ bool Chess::isattacked(colorType color, int mx, int my)
             }
             case Bishop:
             {
-                if (abs(dex) == 2 && abs(dey) == 2)
-                {
-                    int ex = x + dex / 2, ey = y + dey / 2;
-                    auto &eGrid = state[currTurnId][xy2pos(ex, ey)];
-                    if (eGrid.color == EMPTY)
-                    {
+                if (inColorArea(mx, my, color) &&abs(dex) == 2 && abs(dey) == 2) {
+                int ex = x + dex / 2;
+                int ey = y + dey / 2;
+                    if (state[currTurnId][xy2pos(ex, ey)].color == EMPTY) {
                         return true;
                     }
                 }
@@ -3029,7 +3027,7 @@ void ChessAI::alpha_beta_select(vector<MoveNode>& selected){
 }
 
 void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
-    int max_depth = 30;
+    int max_depth = 10;
     
     //搜素开始前，清空杀手着法表
     for(int i = 0;i < max_depth;i ++){
@@ -3079,7 +3077,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
             // 这对下一层迭代时的 PVS 零窗口和 Alpha-Beta 剪枝效率至关重要
             sort(selected.begin(), selected.end(), MoveNodecmp);
             last_completed_selected = selected; //保存本层结果
-            
+
             // 如果已经找到了必胜步，直接提前结束剩余更大深度的搜素
             if (!selected.empty() && selected[0].value > 900000) {
                 break;
