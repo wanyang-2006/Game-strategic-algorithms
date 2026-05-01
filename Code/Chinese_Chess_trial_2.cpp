@@ -14,6 +14,7 @@
 #include <random>
 #include "TuningParams.h"  //在botzone中的路径为 ./data/TuningParams.h 即为目标文件
 #include <fstream>
+#include <cstring>
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -1814,7 +1815,10 @@ void EvalRecord::getGridcontrol(){
             GridControl[side][pos] = 0;
         }
     }
+    for(int pos = 0;pos < 90;pos ++){
 
+        havecontrol[pos] = false;
+    }
     //当前棋局:
     int tmp = board->currTurnId;
     for(int y = 0; y < BOARDHEIGHT; y ++){
@@ -2009,6 +2013,12 @@ void EvalRecord::getGridcontrol(){
 }
 
 bool EvalRecord::hasattackchance(int mx,int my){
+    if(board == nullptr){
+        throw std::runtime_error("(hasattackchance)board is null");
+    }
+    if(!board->inBoard(mx, my)){
+        return false;
+    }
 
     //依靠board->getGridcontrol
     return this->havecontrol[board->xy2pos(mx,my)];
@@ -2436,12 +2446,19 @@ enum AdvisorShapeType {
 
 // 计算特殊阵型（空头炮、窝心马）判定造成的罚分，罚分值越大说明阵型越糟糕
 int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
+    if(board == nullptr){
+        throw std::runtime_error("(calShapePenalty) board is null");
+    }
+
     int penalty = 0;
     colorType oppColor = (color == RED) ? BLACK : RED;
     
+    // 当前整份程序采用的坐标系：
+    // RED   底线 y = 0，九宫 y = 0..2，兵向 y + 1 前进
+    // BLACK 底线 y = 9，九宫 y = 7..9，卒向 y - 1 前进
     // 获取我方将帅的位置 (假设坐标系RED阵营底线y=9, BLACK底线y=0)
-    int kingY = (color == RED) ? 9 : 0;
-    int centerM_Y = (color == RED) ? 8 : 1; // 所谓窝心马的位置必定在九宫中心点
+    int kingY = (color == RED) ? 0 : 9;
+    int centerM_Y = (color == RED) ? 1 : 8; // 所谓窝心马的位置必定在九宫中心点
     
     int kingPos = board->xy2pos(4, kingY);
     if (target[kingPos].type != King || target[kingPos].color != color) {
@@ -2485,6 +2502,8 @@ int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
 
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
+
+    this->getGridcontrol();
 
     int res = 0;
     res += this->calstaticstate(target,color);
@@ -2939,7 +2958,6 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                 }
                 // =====LMR逻辑结束===== \\
 
-                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
                 if((val > alpha) && (val < beta)){ //本区间内检查失败！
                     val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
                 }
@@ -3279,19 +3297,22 @@ bool getchessbook(Chess& chess,Move& bookMove){
     // }
 
     //在出现频次最高的 Move中随机挑选
-    int selectIdx = 0;
-    vector<int> selectIdxes;           //待选择的多个Move的索引
-    selectIdxes.push_back(selectIdx);  //先加入第一个
+    
+    int bestCount = moves[0].get("count",0).asInt();
+    vector<int> selectIdxes{0};
     for(int i = 1;i < moves.size();i ++){
         int c = moves[i].get("count",0).asInt();
-        if(c > selectIdxes[0]){        
+        if(c > bestCount){
+            bestCount = c;
             selectIdxes.clear();
+            selectIdxes.push_back(i);
+        }else if(c == bestCount){
+            selectIdxes.push_back(i);
         }
-        selectIdxes.push_back(i);
     }
 
     srand(time(0));
-    selectIdx = selectIdxes[rand() % selectIdxes.size()];
+    int selectIdx = selectIdxes[rand() % selectIdxes.size()];
 
     const Json::Value &m = moves[selectIdx]["move"];
 

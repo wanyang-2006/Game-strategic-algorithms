@@ -14,6 +14,7 @@
 #include <random>
 #include "TuningParams.h"  //在botzone中的路径为 ./data/TuningParams.h 即为目标文件
 #include <fstream>
+#include <cstring>
 
 using std::uint64_t;   //64位hash
 using std::cin;
@@ -2013,7 +2014,12 @@ void EvalRecord::getGridcontrol(){
 }
 
 bool EvalRecord::hasattackchance(int mx,int my){
-
+    if(board == nullptr){
+        throw std::runtime_error("(hasattackchance)board is null");
+    }
+    if(!board->inBoard(mx, my)){
+        return false;
+    }
     //依靠board->getGridcontrol
     return this->havecontrol[board->xy2pos(mx,my)];
 }
