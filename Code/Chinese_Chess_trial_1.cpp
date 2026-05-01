@@ -1807,7 +1807,7 @@ void EvalRecord::getGridcontrol(){
     if(board == nullptr){
         throw std::runtime_error("(getGridcontrol)board is null");
     }
-
+    std::fill(havecontrol, havecontrol + 90, false);
     //每次使用前都重新清空控制点字典
     for(int side = 0; side < 2; side ++){
         for(int pos = 0; pos < 90; pos ++){
@@ -1990,15 +1990,19 @@ void EvalRecord::getGridcontrol(){
                 bool crossMidLine = (curGrid.color == RED ? (y > 4) : (y < 5));
                 if(crossMidLine){
                     for(int dir = 0; dir < 2; dir ++){
-                        tx = x + dx_lr[dir], ty = y;
-                        if(board->inBoard(tx, ty)){
-                            GridControl[colorId][board->xy2pos(tx, ty)] ++;
-                        }
-                        auto& targetGrid = board->state[tmp][board->xy2pos(tx, ty)];
-                        if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
-                            this->havecontrol[board->xy2pos(x, y)] = true;
-                        } //存在问题 ———— havecontrol中的索引xy2pos(x,y)是攻击目标的坐标，而不是能够攻击的棋子本身的坐标！
+                        tx = x + dx_lr[dir];
+                        ty = y;
                         
+                        if(board->inBoard(tx, ty)){
+                            int target_pos = board->xy2pos(tx, ty);
+                            GridControl[colorId][target_pos] ++;
+                            
+                            auto& targetGrid = board->state[tmp][target_pos];
+                            // 只有在确认坐标没有越界后，才去取 targetGrid 并判断颜色和类型
+                            if(targetGrid.color == board->oppColor(curGrid.color) && targetGrid.type != None){
+                                this->havecontrol[board->xy2pos(x, y)] = true;
+                            } 
+                        }
                     }
                 }
                 break;
