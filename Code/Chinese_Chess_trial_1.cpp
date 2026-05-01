@@ -2946,7 +2946,6 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                 }
                 // =====LMR逻辑结束===== \\
 
-                val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,- alpha);
                 if((val > alpha) && (val < beta)){ //本区间内检查失败！
                     val = -alpha_beta_PVS_search(depth - 1,-beta,-alpha);
                 }
@@ -3286,19 +3285,22 @@ bool getchessbook(Chess& chess,Move& bookMove){
     // }
 
     //在出现频次最高的 Move中随机挑选
-    int selectIdx = 0;
-    vector<int> selectIdxes;           //待选择的多个Move的索引
-    selectIdxes.push_back(selectIdx);  //先加入第一个
+    
+    int bestCount = moves[0].get("count",0).asInt();
+    vector<int> selectIdxes{0};
     for(int i = 1;i < moves.size();i ++){
         int c = moves[i].get("count",0).asInt();
-        if(c > selectIdxes[0]){        
+        if(c > bestCount){
+            bestCount = c;
             selectIdxes.clear();
+            selectIdxes.push_back(i);
+        }else if(c == bestCount){
+            selectIdxes.push_back(i);
         }
-        selectIdxes.push_back(i);
     }
 
     srand(time(0));
-    selectIdx = selectIdxes[rand() % selectIdxes.size()];
+    int selectIdx = selectIdxes[rand() % selectIdxes.size()];
 
     const Json::Value &m = moves[selectIdx]["move"];
 
