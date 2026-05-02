@@ -461,6 +461,39 @@ bool getInputBotzone(Chess &chess,colorType &botcolor); //处理Botzone平台输
 void giveOutputBotzone(Chess &chess); // 向Botzone平台输出落子
 void outputFallBotzone(Chess *chess);
 
+// 将 Move 转换为调试用字符串，不使用 source / target 字段名
+string moveToDebugString(const Move& m)
+{
+    if (m.source_x < 0 || m.source_y < 0 || m.target_x < 0 || m.target_y < 0)
+    {
+        return "-1->-1";
+    }
+
+    string from = string(1, pgnint2char(m.source_x)) + string(1, int2char(m.source_y));
+    string to = string(1, pgnint2char(m.target_x)) + string(1, int2char(m.target_y));
+
+    return from + "->" + to;
+}
+
+// 将 MoveNode 转换为 Json 调试项
+Json::Value moveNodeToDebugJson(const MoveNode& node, int rank)
+{
+    Json::Value item;
+
+    item["rank"] = rank;
+    item["move"] = moveToDebugString(node.strategy);
+
+    // 调试字段不要使用 source / target 这两个名字，避免和 Botzone 正式响应混淆
+    item["sx"] = node.strategy.source_x;
+    item["sy"] = node.strategy.source_y;
+    item["tx"] = node.strategy.target_x;
+    item["ty"] = node.strategy.target_y;
+
+    item["score"] = node.value;
+
+    return item;
+}
+
 int main()
 {
     Chess chess;
@@ -615,68 +648,156 @@ bool getchessbook(Chess& chess,Move& bookMove){
 
 void giveOutputBotzone(Chess& chess){
     Json::Value ret;               
+    Json::Value debug;
     Move targetMove;               //被选中的走法
     bool hasselectedmove = false;  //是否选择了走法？
-    
+
+
+    //调试Json各个字段
+
+    string chooseMethod = "none";
+    debug["debug_type"] = "giveOutputBotzone_search_result";
+    debug["note"] = "debug info is stored in response.debug_info";
+    debug["used_opening_book"] = false;
+    debug["ai_exception"] = "";
+    debug["ai_selected_legal"] = false;
+    debug["candidate_count"] = 0;
+    debug["candidate_output_count"] = 0;
+    debug["candidate_truncated"] = false;
     // //1.优先使用开局库 
     // if(getchessbook(chess,targetMove)){
     //     hasselectedmove = true;
     // }
     Chess searchBoard = chess;
     ChessAI AI(&searchBoard);
+
     if(!hasselectedmove){
-    //2.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
+    //.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
         try{
 
-
             AI.alpha_beta_PVS_select(AI.select);
+
+            debug["candidate_count"] = AI.select.size();
+
             if(AI.select.empty() == false){
                 targetMove = AI.select[0].strategy;
-
+                debug["ai_best_move"] = moveToDebugString(targetMove);
+                debug["ai_best_score"] = AI.select[0].value;
             //再确认是否合法？
-            if(chess.isMoveValidWithForbidden(targetMove)){
-                hasselectedmove = true;
+                if(chess.isMoveValidWithForbidden(targetMove)){
+                    hasselectedmove = true;
+                    chooseMethod = "ai_search";
+                    debug["ai_selected_legal"] = true;
+                }
+                else
+                {
+                    debug["ai_selected_legal"] = false;
+                    debug["ai_reject_reason"] = "AI selected move is not legal under isMoveValidWithForbidden.";
+                }
             }
-        }
+            else{
+                debug["ai_reject_reason"] = "AI.select is empty";
+
+            }
+        
         
         }catch(const std::exception& e){
             hasselectedmove = false;
+            debug["ai_exception"] = e.what();
+            debug["ai_reject_reason"] = "Exception thrown during AI search.";
         }
     }
 
-    //3.经过PVS算法计算之后没有得出合法步，则随机走步
-    if(!hasselectedmove){
+    // 2.记录 AI.select 中的搜索排序与评分
+    // 注意：调试字段不用 source / target，正式落子仍然必须用 response.source / response.target
+    Json::Value candidates(Json::arrayValue);
+
+    int candidateLimit = 60;  // 防止 Botzone 每回合 JSON 过大，可按需要调小或调大
+    int totalCandidateCount = (int)AI.select.size();
+    int outputCount = candidateLimit;
+
+    if (totalCandidateCount < candidateLimit)
+    {
+        outputCount = totalCandidateCount;
+    }
+
+    for (int i = 0; i < outputCount; i++)
+    {
+        Json::Value item = moveNodeToDebugJson(AI.select[i], i);
+        candidates.append(item);
+    }
+
+    debug["candidates"] = candidates;
+    debug["candidate_output_count"] = outputCount;
+
+    if (totalCandidateCount > candidateLimit)
+    {
+        debug["candidate_truncated"] = true;
+    }
+    else
+    {
+        debug["candidate_truncated"] = false;
+    }
+
+
+    // 3. 经过 PVS 算法计算之后没有得出合法步，则随机走步
+    if (!hasselectedmove)
+    {
         vector<Move> retMoves;
         chess.generateMovesWithForbidden(retMoves);
 
-        //找不到合法棋步了，认输
+        debug["fallback_legal_move_count"] = (int)retMoves.size();
+
+        // 找不到合法棋步了，认输
         if (retMoves.empty())
         {
             ret["response"]["source"] = string("-1");
             ret["response"]["target"] = string("-1");
+
+            chooseMethod = "no_legal_move";
+
+            debug["choose_method"] = chooseMethod;
+            debug["final_move"] = "-1->-1";
+            debug["final_reason"] = "No legal move generated by generateMovesWithForbidden.";
+
+            // 调试信息放入 response 内部，便于 Botzone 运行日志显示
+            ret["response"]["debug_info"] = debug;
 
             Json::FastWriter writer;
             cout << writer.write(ret) << endl;
             return;
         }
 
-        //找到合法随机棋步
+        // 找到合法随机棋步
         srand(time(nullptr));
         int choice = rand() % retMoves.size();
-        targetMove = retMoves[choice];        
+        targetMove = retMoves[choice];
+
+        hasselectedmove = true;
+        chooseMethod = "fallback_random";
+
+        debug["fallback_choice_index"] = choice;
+        debug["fallback_move"] = moveToDebugString(targetMove);
+        debug["final_reason"] = "AI did not provide a legal move, so fallback random move was used.";
     }
 
-    writeMoveToJson(ret,targetMove);
+    // Botzone 正式响应：这两个字段必须保留
+    writeMoveToJson(ret, targetMove);
 
+    // 调试信息：不要使用 source / target 字段名
+    debug["choose_method"] = chooseMethod;
+    debug["final_move"] = moveToDebugString(targetMove);
+    debug["final_sx"] = targetMove.source_x;
+    debug["final_sy"] = targetMove.source_y;
+    debug["final_tx"] = targetMove.target_x;
+    debug["final_ty"] = targetMove.target_y;
+
+    // 放在 response 内部，Botzone 日志更可能显示
+    ret["response"]["debug_info"] = debug;
+
+    // 只输出一次 JSON；不要再 cout 第二个 JSON，也不要再 cerr
     Json::FastWriter writer;
     cout << writer.write(ret) << endl;
-
-    for(auto &n : AI.select){
-        std::cerr << char('a' + n.strategy.source_x) << n.strategy.source_y
-        <<"->"<<char('a' + n.strategy.target_x) << n.strategy.target_y
-        <<" score = " << n.value
-        <<std::endl;
-    }
 }
 // 解析Botzone平台输入以更新棋局状态的函数定义
 bool getInputBotzone(Chess &chess)
