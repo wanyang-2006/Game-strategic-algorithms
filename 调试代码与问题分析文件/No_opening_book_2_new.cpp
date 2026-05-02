@@ -2582,7 +2582,6 @@ int EvalRecord::calstaticstate(vector<Grid> &target, colorType color)
 
     for (int y = 9; y >= 0; y--) {
         for (int x = 0; x <= 8; x++) {
-            auto& curGrid = target[board->xy2pos(x, y)];
             int pos = board->xy2pos(x,y);
             const Grid& curGrid = target[pos];
 
