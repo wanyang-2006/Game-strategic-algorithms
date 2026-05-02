@@ -3871,6 +3871,8 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
         return evaluator.calstate(board->state[board->currTurnId], board->currColor);
     }
     
+    int best_val = minstateval;
+
     int kingX = -1, kingY = -1;
     int startY = (board->currColor == RED) ? 0 : 7;
     int endY   = (board->currColor == RED) ? 2 : 9;//扫描九宫格内
@@ -3894,8 +3896,11 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
 
     if (!inCheck) {
         int stand = evaluator.calstate(board->state[board->currTurnId], board->currColor);
+        best_val = stand; // Stand Pat 分数在本节点的初始底线
+
+        // 软失败
         if (stand >= beta) {
-            return beta;
+            return stand; // 返回 stand
         }
         if (stand > alpha) {
             alpha = stand;
@@ -3973,7 +3978,11 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
             // 静态搜索，传 mdepth-1 防止深度过深崩溃
             val = -quiescence_search(-beta, -alpha, mdepth - 1); 
         }
-        
+        //记录最高真实分数
+        if(val>best_val){
+            best_val=val;
+        }
+
         // Beta 剪枝
         if (val >= beta) {
             return beta;
@@ -3984,7 +3993,7 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
         }
     }
 
-    return alpha;
+    return best_val;
 }
 
 
