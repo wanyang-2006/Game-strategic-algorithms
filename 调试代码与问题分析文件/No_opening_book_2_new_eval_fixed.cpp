@@ -619,10 +619,10 @@ void giveOutputBotzone(Chess& chess){
     Move targetMove;               //被选中的走法
     bool hasselectedmove = false;  //是否选择了走法？
     
-    // //1.优先使用开局库 
-    // if(getchessbook(chess,targetMove)){
-    //     hasselectedmove = true;
-    // }
+    //1.优先使用开局库 
+    if(getchessbook(chess,targetMove)){
+        hasselectedmove = true;
+    }
 
     if(!hasselectedmove){
     //2.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”

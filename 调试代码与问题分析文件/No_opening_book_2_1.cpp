@@ -666,10 +666,10 @@ void giveOutputBotzone(Chess& chess){
     debug["candidate_count"] = 0;
     debug["candidate_output_count"] = 0;
     debug["candidate_truncated"] = false;
-    // //1.优先使用开局库 
-    // if(getchessbook(chess,targetMove)){
-    //     hasselectedmove = true;
-    // }
+    //1.优先使用开局库 
+    if(getchessbook(chess,targetMove)){
+        hasselectedmove = true;
+    }
     Chess searchBoard = chess;
     ChessAI AI(&searchBoard);
 
