@@ -3247,7 +3247,7 @@ bool MoveNodecmp(const MoveNode& Nodex, const MoveNode& Nodey) {
 
 void ChessAI::MoveNodesort(vector<MoveNode>& nodes) {
     //快速排序 vector<MoveNode> 
-    sort(nodes.begin(), nodes.end(), MoveNodecmp);
+    stable_sort(nodes.begin(), nodes.end(), MoveNodecmp);
 }
 void Chess::makeNullMove(){
     state.push_back(state[currTurnId]);
