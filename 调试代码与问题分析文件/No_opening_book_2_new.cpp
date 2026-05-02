@@ -29,6 +29,7 @@ using std::ifstream;   //文件流读写
 using std::ofstream;
 using std::string;
 using std::to_string;
+using std::stable_sort;
 
 #define BOARDWIDTH 9   // 棋盘宽度
 #define BOARDHEIGHT 10 // 棋盘高度
@@ -87,41 +88,43 @@ int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”�
 //初始化Zobrist随机数表和Zobrist 轮次标识
 
 namespace Tuning {
-    // MVV 
+    // MVV (Most Valuable Victim) — 被吃子价值
     // 对应 stoneType: None=0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7
     constexpr int VictimValue[8] = {
         0,      // None
-        5,  // King 
-        1,    // Bishop 
-        3,   // Knight 
-        4,    // Rook 
-        2,    // Pawn 
-        3,    // Cannon 
-        1     // Assistant 
+        6,      // King  — 最大
+        1,      // Bishop
+        4,      // Knight — 与Cannon区分
+        5,      // Rook
+        2,      // Pawn
+        3,      // Cannon — 与Knight区分
+        1       // Assistant（与Bishop持平，但士象通常价值接近）
     };
 
-    // LVA 
+    // LVA (Least Valuable Attacker) — 攻击子价值
     constexpr int AttackerValue[8] = {
         0,      // None
-        5,  // King
-        1,    // Bishop
-        3,    // Knight
-        4,    // Rook
-        2,    // Pawn
-        3,    // Cannon
-        1     // Assistant
+        6,      // King
+        1,      // Bishop
+        4,      // Knight
+        5,      // Rook
+        2,      // Pawn
+        3,      // Cannon
+        1       // Assistant
     };
     
     // 吃子着法的得分永远高于非吃子着法
     constexpr int CaptureBaseScore = 100;
 
+    // MVV/LVA + 受保护惩罚：优先用小子吃大子，且避免用子换对方有保护的子
     inline int getMVVLVAScore(stoneType attacker, stoneType victim, bool isProtected) {
         if (victim == None) {
             return 0;
-        }//MVV/LAA
+        }
 
-        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] :0;
-        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - Tuning::AttackerValue[attacker];
+        // 如果被吃子有保护，则需要加上攻击子被反吃的惩罚（等价于用 attacker 换 victim）
+        int attackerPenalty = isProtected ? Tuning::AttackerValue[attacker] : 0;
+        return Tuning::CaptureBaseScore + (Tuning::VictimValue[victim] * 10) - attackerPenalty;
     }
 }
 
@@ -3169,7 +3172,14 @@ int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
     auto target_piece = curstate[target_pos].type;
     auto source_piece = curstate[source_pos].type;
     if (target_piece == None) {
-        return 0; // 不吃子时的得分
+        // 非吃子着法：不能全返回0，否则所有非吃子着法排序完全随机
+        // 用移动棋子的价值作为基础排序分（远低于吃子着法，确保吃子优先）
+        // 加上向对方底线推进的行进奖励，使排序有区分度
+        int baseScore = Tuning::AttackerValue[source_piece];
+        int targetRow = cur.target_y;
+        // 红方底线在第9行，向第0行推进；黑方底线在第0行，向第9行推进
+        int advanceBonus = (color == RED) ? (9 - targetRow) : targetRow;
+        return baseScore + advanceBonus;
     }
 
     colorType oppCol = board->oppColor(color);
@@ -3421,7 +3431,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
 
             // 每一层搜索完整结束后，将最优着法排到最前。
             // 这对下一层迭代时的 PVS 零窗口和 Alpha-Beta 剪枝效率至关重要
-            sort(selected.begin(), selected.end(), MoveNodecmp);
+            stable_sort(selected.begin(), selected.end(), MoveNodecmp);
             last_completed_selected = selected; //保存本层结果
 
             // 如果已经找到了必胜步，直接提前结束剩余更大深度的搜素
@@ -3435,7 +3445,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
         selected = last_completed_selected;
     }
 
-    sort(selected.begin(),selected.end(),MoveNodecmp);
+    stable_sort(selected.begin(),selected.end(),MoveNodecmp);
 }
 
 //alpha —— beta 具体搜索函数 将函数入口和函数体相剥离
@@ -3592,12 +3602,14 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
     //记录TT 表中，所得到的最优节点
     int original_alpha = alpha;
     Move best_move; //当前节点探索出的最佳着法
+    int best_val = minstateval; //引入best_val 记录本节点实际搜素得到的最大得分
     int val;
 
     //LMR改进 ———— 执行探测 val = -alpha_beta_PVS_search(depth - 1,-alpha - 1,-alpha); 
     //零窗口探测之前，先判断是否跳过部分深度。如果判定成功，才进行下一步的补充搜素，从而在残局和中局减少分支节点
     //这一步必须是“白手” ———— 这一步着棋没有吃子和将军
     int moveIndex = 0; //LMR ———— 当前是第几个着法
+
 
     for(auto& node : tmpMoveNodes){
         bool isQuiet = this->isQuietMove(board->state[board->currTurnId],node);
@@ -3631,13 +3643,15 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         } //这里的括号用于限制MoveGuard作用域
         moveIndex++;//尝试后moveIndex递增 
 
-        if(val > alpha){
-            best_move = node.strategy;
+        //修改：只要比当前的best_val好，就记录下来
+        if(val > best_val){
+            best_val = val;
+            best_move = node.strategy; 
         }
 
         if(val >= beta){ //beta剪枝
             //beta剪枝，引发截断，记录为Beta节点
-            RecordHash(curkey,depth,beta,BETA,node.strategy);
+            RecordHash(curkey,depth,val,BETA,node.strategy);
             
 
             //记录本层的杀手着法 
@@ -3653,7 +3667,7 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
                 }
             }
 
-            return beta;
+            return best_val;
         }
 /*
         if(val > alpha && !havethreat_of_valuestone(this->board->state...,board->currColor)){ //alpha剪枝
@@ -3668,10 +3682,10 @@ int ChessAI::alpha_beta_PVS_search(int depth,int alpha,int beta){
         }
     }
     //搜素完毕，未发生Beta剪枝。根据Alpha是否被更新，写入EXACT 或者 ALPHA
-    HashFlag flag = (alpha > original_alpha) ? EXACT : ALPHA;
-    RecordHash(curkey,depth,alpha,flag,best_move);
+    HashFlag flag = (best_val > original_alpha) ? EXACT : ALPHA;
+    RecordHash(curkey,depth,best_val,flag,best_move);
 
-    return alpha;
+    return best_val;
 }
 
 
@@ -3926,7 +3940,9 @@ int ChessAI::quiescence_search(int alpha, int beta, int mdepth) {
                 int mvvlva = Tuning::getMVVLVAScore(attacker, victim, isProtected);
                 node.value = mvvlva + 10000;
             } else {
-                node.value = 0;
+                // 被将军时的逃将着法（非吃子）：用攻击子的价值作为区分，
+                // 确保吃子着法优先于逃将着法
+                node.value = Tuning::AttackerValue[attacker];
             }
             
             qsNodes[qsCount++] = node;
