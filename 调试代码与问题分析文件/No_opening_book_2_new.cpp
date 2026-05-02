@@ -2266,12 +2266,12 @@ namespace Evalpara{
     //动态控制点评估：保护奖励，避免无根子情况的出现
     inline int defenceBonus(stoneType ownPiece) {
         switch (ownPiece) {
-        case Rook:      return 10;
-        case Cannon:    return 7;
-        case Knight:    return 7;
-        case Assistant: return 5;
-        case Bishop:    return 5;
-        case Pawn:      return 3;
+        case Rook:      return 20;
+        case Cannon:    return 14;
+        case Knight:    return 14;
+        case Assistant: return 10;
+        case Bishop:    return 10;
+        case Pawn:      return 6;
         default:        return 0;
         }
     }
@@ -2279,7 +2279,7 @@ namespace Evalpara{
     //送子惩罚(对方控制数量大于己方控制数量)
     inline int hangingPenalty(stoneType ownPiece) {
         if (ownPiece == King || ownPiece == None) return 0;
-        int p = LiveValue[ownPiece] / 8;
+        int p = LiveValue[ownPiece] / 2;
         if (p < 12) p = 12;
         if (p > 140) p = 140;
         return p;
@@ -2940,7 +2940,7 @@ const int oppdynamicweight = 1;
 //空头炮和窝心马的惩罚分数数组(随敌方炮距我方底线的纵深改变)
 static const int HollowThreat[10] = { 80, 80, 80, 70, 60, 50, 40, 30, 20, 10 };
 static const int CentralThreat[10] = { 100, 100, 90, 80, 70, 60, 50, 40, 30, 20 };
-
+static const int BelowPawn = 50;
 enum AdvisorShapeType {
     SHAPE_NONE = 0,
     SHAPE_CENTER = 1, // 中路空虚
@@ -2949,6 +2949,7 @@ enum AdvisorShapeType {
 };
 
 // 计算特殊阵型（空头炮、窝心马）判定造成的罚分，罚分值越大说明阵型越糟糕
+// 添加底线卒罚分
 int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
     if(board == nullptr){
         throw std::runtime_error("(calShapePenalty) board is null");
@@ -2960,7 +2961,7 @@ int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
     // 当前整份程序采用的坐标系：
     // RED   底线 y = 0，九宫 y = 0..2，兵向 y + 1 前进
     // BLACK 底线 y = 9，九宫 y = 7..9，卒向 y - 1 前进
-    // 获取我方将帅的位置 (假设坐标系RED阵营底线y=9, BLACK底线y=0)
+    // 获取我方将帅的位置 
     int kingY = (color == RED) ? 0 : 9;
     int centerM_Y = (color == RED) ? 1 : 8; // 所谓窝心马的位置必定在九宫中心点
     
@@ -3001,23 +3002,35 @@ int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
         }
     }
     
+    //底线兵 / 卒罚分
+    int oppBottomY = (color == RED) ? 9 : 0;
+    for(int x = 0;x <= 8;x ++){
+        int pos = board->xy2pos(x,oppBottomY);
+        //对方底线上存在我方的兵 / 卒，则扣分
+        if(target[pos].type == Pawn && target[pos].color == color){
+            penalty += BelowPawn;
+        }
+    }
+
     return penalty;
 }
 
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
     getGridcontrol();
-    int res = 0;
-    res += this->calstaticstate(target,color);
-    res += this->caldynamicstate(target,color);
-    
-    // 特殊棋形扣分、静态评估、动态评估
+    const int StaticWeight = 60;
+    const int DynamicWeight = 90;
+
+    int staticScore = this->calstaticstate(target,color);
+    int dynamicScore = this->caldynamicstate(target,color);
+
     colorType oppCol = (color == RED) ? BLACK : RED;
     int myShapePenalty = this->calShapePenalty(target, color);
     int oppShapePenalty = this->calShapePenalty(target, oppCol);
+
+    int res = (staticScore * StaticWeight + dynamicScore * DynamicWeight) / 100;
     res = res - myShapePenalty + oppShapePenalty;
 
-    
     return res;
 }
 
@@ -3027,7 +3040,7 @@ int EvalRecord::calcurmove(Move& cur, vector<Grid>& curstate, colorType color) {
 
     auto target_piece = curstate[target_pos].type;
     auto source_piece = curstate[source_pos].type;
-if (target_piece == None) {
+    if (target_piece == None) {
         return 0; // 不吃子时的得分
     }
 
