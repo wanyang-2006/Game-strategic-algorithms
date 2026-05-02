@@ -622,12 +622,12 @@ void giveOutputBotzone(Chess& chess){
     // if(getchessbook(chess,targetMove)){
     //     hasselectedmove = true;
     // }
-
+    Chess searchBoard = chess;
+    ChessAI AI(&searchBoard);
     if(!hasselectedmove){
     //2.接下来使用AI进行对局;如果AI没有选出合法步，那么用随机步来“死马权当活马医”
         try{
-            Chess searchBoard = chess;
-            ChessAI AI(&searchBoard);
+
 
             AI.alpha_beta_PVS_select(AI.select);
             if(AI.select.empty() == false){
@@ -670,6 +670,13 @@ void giveOutputBotzone(Chess& chess){
 
     Json::FastWriter writer;
     cout << writer.write(ret) << endl;
+
+    for(auto &n : AI.select){
+        std::cerr << char('a' + n.strategy.source_x) << n.strategy.source_y
+        <<"->"<<char('a' + n.strategy.target_x) << n.strategy.target_y
+        <<" score = " << n.value
+        <<std::endl;
+    }
 }
 // 解析Botzone平台输入以更新棋局状态的函数定义
 bool getInputBotzone(Chess &chess)
@@ -3267,10 +3274,13 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
     // 搜索计时从根节点开始
     searchTime.start();
 
+    int current_depth = 0;
     //迭代加深逻辑
     try {
         //外层增加迭代加深循环：从深度1查到max_depth
         for(int d = 1;d <= max_depth;d ++){
+            current_depth = d;
+
             int alpha = minstateval;
             int beta = maxstateval;
 
@@ -3300,6 +3310,7 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
         }
     } catch (const TimeOutException &) {
         // 超时时保留当前已经评估出的最佳结果
+        std::cerr << "搜素时间结束，当前正在搜素的深度 : " << current_depth << std::endl;
         selected = last_completed_selected;
     }
 
