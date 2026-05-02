@@ -3412,21 +3412,23 @@ void ChessAI::alpha_beta_PVS_select(vector<MoveNode>& selected){
         for(int d = 1;d <= max_depth;d ++){
             current_depth = d;
 
-            int alpha = minstateval;
-            int beta = maxstateval;
-
             for(auto& Node : selected){
                 searchTime.check();
+
+                int alpha = minstateval;
+                int beta = maxstateval;
+
                 {
                     MoveGuard guard(this,Node);
                     int score = -alpha_beta_PVS_search(d - 1,-beta,-alpha);
 
                     Node.value = score;
                 }
+                //所有根节点着法不再公用一个alpha
 
-                if(Node.value > alpha){
-                    alpha = Node.value;
-                }
+                // if(Node.value > alpha){
+                //     alpha = Node.value;
+                // }
             }
 
             // 每一层搜索完整结束后，将最优着法排到最前。
