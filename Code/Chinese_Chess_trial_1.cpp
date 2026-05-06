@@ -2806,7 +2806,7 @@ int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
 
 //集成局面总评估方法(后续进行补充)
 int EvalRecord::calstate(vector<Grid>& target,colorType color){
-
+    getGridcontrol();
     int res = 0;
     res += this->calstaticstate(target,color);
     res += this->caldynamicstate(target,color);
