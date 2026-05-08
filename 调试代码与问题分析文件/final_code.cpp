@@ -87,7 +87,7 @@ int dy_bishop_eye[] = {-1, 1, -1, 1};              // 象（相）走“田”�
 //类似于算法题目中的记忆化搜索 ———— 将先前搜索得到的节点存入置换表
 //初始化Zobrist随机数表和Zobrist 轮次标识
 
-namespace Tuning {
+namespace Tuning {  //用于调整的参数
     // MVV (Most Valuable Victim) — 被吃子价值
     // 对应 stoneType: None=0, King=1, Bishop=2, Knight=3, Rook=4, Pawn=5, Cannon=6, Assistant=7
     constexpr int VictimValue[8] = {
@@ -279,7 +279,7 @@ struct TTStateNode{
 const int TT_SIZE = 1048576; //1M个
 TTStateNode HashTable[TT_SIZE];
 
-
+//探测置换表中是否已经存在当前局面的搜素记录，如果存在且满足条件，则直接提取并复用这些记录
 bool probeHash(uint64_t key,int depth,int alpha,int beta,int &val,Move& bestMove){
     TTStateNode& entry = HashTable[key & (TT_SIZE - 1)];
 
@@ -3026,7 +3026,7 @@ int EvalRecord::calShapePenalty(vector<Grid>& target, colorType color) {
     AdvisorShapeType nShape = SHAPE_NONE;
     int centerAdvPos = board->xy2pos(4, centerM_Y);
 
-    // 简化判断：如果(4, centerM_Y)没有我方的士，说明中门大开
+    // 如果(4, centerM_Y)没有我方的士，说明中门大开
     if (target[centerAdvPos].type != Assistant || target[centerAdvPos].color != color) {
         nShape = SHAPE_CENTER;
     }
