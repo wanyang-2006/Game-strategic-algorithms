@@ -717,7 +717,7 @@ void giveOutputBotzone(Chess& chess){
 
     }
 
-    // Botzone 正式响应：这两个字段必须保留
+    // Botzone 正式响应：填写ret targetMove这两个字段
     writeMoveToJson(ret, targetMove);
 
 
